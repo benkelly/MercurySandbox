@@ -18,6 +18,10 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 BRANCH="agent/${STAMP}"
 NAME="mercury-${STAMP}"
 
+# Default is the image Terraform builds locally; point SANDBOX_IMAGE at the
+# published one (ghcr.io/benkelly/mercury-sandbox:latest) to skip building.
+IMAGE="${SANDBOX_IMAGE:-agent-sandbox:latest}"
+
 # Inject the PAT into the clone URL only inside the container's env, scoped
 # token, branch push only.
 AUTHED_URL="${REPO_URL/https:\/\//https://x-access-token:${SANDBOX_GIT_TOKEN}@}"
@@ -49,12 +53,12 @@ echo "sandbox container: ${NAME}  (mercury ps | logs | exec | kill)" >&2
 
 if [ -z "${TASK}" ]; then
   # Interactive: you drive the TUI, container still evaporates on exit
-  exec docker run -it "${DOCKER_ARGS[@]}" agent-sandbox:latest \
+  exec docker run -it "${DOCKER_ARGS[@]}" "${IMAGE}" \
     -c "${SETUP} && opencode"
 fi
 
 # Non-interactive: run the task, commit and push whatever changed
-exec docker run "${DOCKER_ARGS[@]}" agent-sandbox:latest -c "
+exec docker run "${DOCKER_ARGS[@]}" "${IMAGE}" -c "
   ${SETUP} &&
   opencode run --model \"openai/${MODEL}\" \"${TASK}\" &&
   git add -A &&

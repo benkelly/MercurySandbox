@@ -104,7 +104,7 @@ mercury kill <name>   # stop one early (it self-deletes)
 mercury models        # list models the gateway exposes
 mercury status        # gateway container status
 mercury install hermes|webui|ocm
-mercury down          # tear it all down
+mercury down          # tear it all down (refuses while sandboxes run, --force overrides)
 ```
 
 Every command also works against a remote Docker host over SSH, so from a
@@ -132,11 +132,11 @@ GitHub Actions runs on every push and pull request:
   sandbox image for amd64 and arm64 and publishes it to GHCR as
   `ghcr.io/benkelly/mercury-sandbox`
 
-To use the published image instead of building locally:
+To run sandboxes from the published image instead of the local Terraform
+build, set `SANDBOX_IMAGE` (in `.env` or the environment):
 
 ```bash
-docker pull ghcr.io/benkelly/mercury-sandbox:latest
-docker tag ghcr.io/benkelly/mercury-sandbox:latest agent-sandbox:latest
+SANDBOX_IMAGE=ghcr.io/benkelly/mercury-sandbox:latest ./sandbox/run-sandbox.sh ...
 ```
 
 ## Remote access
@@ -148,6 +148,24 @@ then reach every UI over the tailnet:
 - opencode-manager: `http://<host-tailscale-ip>:5003`
 - Telegram works from anywhere with no extra setup
 - the `mercury` CLI: `MERCURY_HOST=you@<host> mercury ps` (SSH over the tailnet)
+
+### Cloudflare Tunnel (optional)
+
+Prefer Cloudflare, or want a stable public hostname? Create a tunnel in the
+Zero Trust dashboard (Networks -> Tunnels), put its token in `.env` as
+`CLOUDFLARE_TUNNEL_TOKEN`, and `terraform apply`. A `cloudflared` container
+joins the stack and is destroyed with it; leave the token empty and it never
+starts.
+
+Route public hostnames to services in the dashboard:
+
+- host services (hermes-webui, opencode-manager): `http://host.docker.internal:<port>`
+- anything on agentnet by container name, e.g. `http://gateway:4000`
+
+Put Cloudflare Access in front of every hostname you route — these UIs drive
+agents that can push to your repos. Avoid exposing the gateway at all unless
+you need to; its master key is the only thing between the internet and your
+API spend.
 
 ## Security model
 

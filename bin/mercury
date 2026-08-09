@@ -30,7 +30,8 @@ mercury — a safe playground for autonomous coding agents
 Usage:
   mercury up                      terraform init + apply (gateway, network, sandbox image)
   mercury plan                    terraform plan, see what up would do
-  mercury down                    terraform destroy, tear the stack down
+  mercury down [--force]          terraform destroy, tear the stack down
+                                  (refuses while sandboxes are running)
   mercury sandbox <git-url> [task] [model]
                                   spawn a throwaway opencode sandbox
   mercury ps                      list running sandbox containers
@@ -86,6 +87,24 @@ case "$cmd" in
     tf plan "$@"
     ;;
   down)
+    force=0
+    if [ "${1:-}" = "--force" ] || [ "${1:-}" = "-f" ]; then
+      force=1
+      shift
+    fi
+    running="$(docker ps --filter label=mercury.sandbox --format '{{.Names}}' 2>/dev/null || true)"
+    if [ -n "$running" ] && [ "$force" -eq 0 ]; then
+      {
+        echo "mercury: sandboxes are still running:"
+        echo "$running" | sed 's/^/  /'
+        echo "Destroying now would cut them off, and removing the agentnet network"
+        echo "will fail while containers are attached, leaving a partial destroy."
+        echo "Stop them first (mercury kill <name>) or rerun with: mercury down --force"
+      } >&2
+      exit 1
+    fi
+    echo "Heads-up: this destroys the LiteLLM gateway too, anything mid-task" >&2
+    echo "(Hermes, opencode-manager) loses its model endpoint." >&2
     tf destroy "$@"
     ;;
   sandbox)

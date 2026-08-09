@@ -15,6 +15,12 @@ variable "openrouter_api_key" {
   default   = ""
 }
 
+variable "cloudflare_tunnel_token" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
 # Populate from .env without retyping:
 #   set -a; source ../.env; set +a
 #   export TF_VAR_litellm_master_key="$LITELLM_MASTER_KEY"

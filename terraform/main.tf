@@ -69,3 +69,36 @@ resource "docker_image" "sandbox" {
     dockerfile_sha = filesha256("${path.module}/../sandbox/Dockerfile")
   }
 }
+
+# ---- Cloudflare Tunnel (optional) ------------------------------------------
+# Alternative (or addition) to Tailscale for remote access. Create a tunnel in
+# the Cloudflare Zero Trust dashboard, put its token in .env as
+# CLOUDFLARE_TUNNEL_TOKEN, and apply. Leave the token empty and none of this
+# is created. Route hostnames to services in the dashboard, see the README.
+
+resource "docker_image" "cloudflared" {
+  count = var.cloudflare_tunnel_token == "" ? 0 : 1
+  name  = "cloudflare/cloudflared:latest"
+}
+
+resource "docker_container" "cloudflared" {
+  count   = var.cloudflare_tunnel_token == "" ? 0 : 1
+  name    = "cloudflared"
+  image   = docker_image.cloudflared[0].image_id
+  restart = "unless-stopped"
+
+  command = ["tunnel", "--no-autoupdate", "run"]
+
+  env = ["TUNNEL_TOKEN=${var.cloudflare_tunnel_token}"]
+
+  networks_advanced {
+    name = docker_network.agentnet.name
+  }
+
+  # Lets tunnel routes reach services on the host (hermes-webui,
+  # opencode-manager) as host.docker.internal, on plain Linux dockerd too
+  host {
+    host = "host.docker.internal"
+    ip   = "host-gateway"
+  }
+}
