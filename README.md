@@ -5,7 +5,7 @@
 [![CI](https://github.com/benkelly/MercurySandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/benkelly/MercurySandbox/actions/workflows/ci.yml)
 
 An open-source sandbox for running Hermes-powered coding agents securely,
-self-hosted on a Mac mini (or any Docker host):
+self-hosted on any Docker host:
 
 - **LiteLLM gateway** (Docker, via Terraform), one OpenAI-compatible endpoint, all API keys live here
 - **opencode sandbox image** (Docker), throwaway containers for coding tasks
@@ -13,7 +13,7 @@ self-hosted on a Mac mini (or any Docker host):
 - **hermes-webui** (native), browser and mobile UI for Hermes
 - **opencode-manager** (Docker, its own compose), mobile-first PWA for opencode sessions
 
-The model APIs do the heavy lifting, so an M4 mini handles all of this comfortably.
+The model APIs do the heavy lifting, so a modest machine handles all of this comfortably.
 
 ## Prerequisites
 
@@ -61,7 +61,7 @@ Then run `hermes setup` and:
 - point its model provider at `http://localhost:4000/v1` with your LITELLM_MASTER_KEY
   (OpenAI-compatible endpoint), or configure providers directly if you prefer
 - choose the **Docker** terminal backend so Hermes executes shell work inside
-  containers rather than on your Mac (see the Hermes docs, backend options are
+  containers rather than on the host (see the Hermes docs, backend options are
   local, Docker, SSH and others)
 - optionally set up the Telegram gateway (`hermes gateway`) for phone access
 
@@ -107,11 +107,11 @@ mercury install hermes|webui|ocm
 mercury down          # tear it all down
 ```
 
-Every command also works against the mini remotely over SSH, so from a laptop
-on the tailnet:
+Every command also works against a remote Docker host over SSH, so from a
+laptop on the tailnet:
 
 ```bash
-export MERCURY_HOST=ben@<mini-tailscale-name>   # or -H per command
+export MERCURY_HOST=you@<host-tailscale-name>   # or -H per command
 mercury ps
 mercury sandbox https://github.com/you/some-repo.git "fix the flaky test"
 mercury exec mercury-20260809-120000            # drop into that sandbox
@@ -141,13 +141,13 @@ docker tag ghcr.io/benkelly/mercury-sandbox:latest agent-sandbox:latest
 
 ## Remote access
 
-Don't port forward. Install Tailscale on the mini and your phone/laptop, then
-reach every UI over the tailnet:
+Don't port forward. Install Tailscale on the Docker host and your phone/laptop,
+then reach every UI over the tailnet:
 
-- hermes-webui: `http://<mini-tailscale-ip>:<port>`
-- opencode-manager: `http://<mini-tailscale-ip>:5003`
+- hermes-webui: `http://<host-tailscale-ip>:<port>`
+- opencode-manager: `http://<host-tailscale-ip>:5003`
 - Telegram works from anywhere with no extra setup
-- the `mercury` CLI: `MERCURY_HOST=ben@<mini> mercury ps` (SSH over the tailnet)
+- the `mercury` CLI: `MERCURY_HOST=you@<host> mercury ps` (SSH over the tailnet)
 
 ## Security model
 
@@ -156,10 +156,10 @@ reach every UI over the tailnet:
 - Git is the only write path out, use a fine-grained PAT or deploy key scoped
   to the one repo, agents push branches, you merge
 - All model API keys live in LiteLLM only
-- Later, on the UDM-SE: put the mini on its own VLAN with an egress allowlist
+- Optionally, put the host on its own VLAN with an egress allowlist at the router
 
-## Moving off the mini later
+## Moving to another host later
 
-The Terraform is provider-agnostic Docker, so pointing it at a Linux host is a
-one-line change to the provider block (ssh:// docker host), and Hermes installs
-the same way on any Linux box. `~/.hermes` moves with a copy.
+The Terraform is provider-agnostic Docker, so pointing it at a different
+machine is a one-line change to the provider block (ssh:// docker host), and
+Hermes installs the same way on any Linux box. `~/.hermes` moves with a copy.

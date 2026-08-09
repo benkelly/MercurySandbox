@@ -1,4 +1,4 @@
-# Throwaway opencode sandbox. Multi-arch (works on the M4's arm64).
+# Throwaway opencode sandbox. Multi-arch (amd64 and arm64).
 # Rebuild when you want newer opencode: terraform apply, or
 #   docker build -t agent-sandbox:latest sandbox/
 

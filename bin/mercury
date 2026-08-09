@@ -7,8 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 [ $# -gt 0 ] || set -- help
 
-# Run any command on a remote host (the Mac mini) instead of locally:
-#   MERCURY_HOST=ben@mini mercury status     or     mercury -H ben@mini status
+# Run any command on a remote Docker host instead of locally:
+#   MERCURY_HOST=you@host mercury status     or     mercury -H you@host status
 # Assumes this repo is checked out on the remote at MERCURY_REMOTE_DIR
 # (default: MercurySandbox, relative to the remote home directory).
 HOST="${MERCURY_HOST:-}"
@@ -46,10 +46,10 @@ Usage:
 
 Remote:
   Every command also runs against a remote Docker host over SSH, so you can
-  drive the Mac mini from a laptop on the tailnet:
+  drive it from a laptop on the tailnet:
 
-    mercury -H ben@mini status
-    MERCURY_HOST=ben@mini mercury ps
+    mercury -H you@host status
+    MERCURY_HOST=you@host mercury ps
 
   Requires this repo checked out on the remote, path set by MERCURY_REMOTE_DIR
   (default: ~/MercurySandbox).

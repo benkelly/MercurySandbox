@@ -8,8 +8,8 @@ terraform {
   }
 }
 
-# Mac mini: local Docker Desktop / OrbStack socket.
-# Later, point at a Linux box instead:  host = "ssh://ben@homelab-host"
+# Local Docker Desktop / OrbStack / dockerd socket.
+# For a remote host instead:  host = "ssh://you@remote-host"
 provider "docker" {
   host = "unix:///var/run/docker.sock"
 }
