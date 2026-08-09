@@ -41,6 +41,7 @@ Usage:
   mercury kill <container>        stop a sandbox (it self-deletes)
   mercury models                  list models exposed by the LiteLLM gateway
   mercury status                  show the gateway container status
+  mercury doctor                  read-only health checks on the whole stack
   mercury install <hermes|webui|ocm>
                                   run the matching install script
   mercury help                    show this help
@@ -140,6 +141,94 @@ case "$cmd" in
     ;;
   status)
     docker ps --filter name=gateway --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+    ;;
+  doctor)
+    fails=0
+    report() { printf '%-5s %s\n' "$1" "$2"; }
+
+    # 1. docker daemon
+    docker_up=0
+    if docker info >/dev/null 2>&1; then
+      report ok "docker daemon reachable"
+      docker_up=1
+    else
+      report FAIL "docker daemon not reachable"
+      fails=$((fails + 1))
+    fi
+
+    # 2-5. .env and its contents
+    if [ -f "$ROOT/.env" ]; then
+      report ok ".env present"
+      load_env
+      if [ -n "${LITELLM_MASTER_KEY:-}" ] && [ "${LITELLM_MASTER_KEY:-}" != "sk-local-change-me" ]; then
+        report ok "LITELLM_MASTER_KEY set"
+      else
+        report FAIL "LITELLM_MASTER_KEY missing or still the placeholder"
+        fails=$((fails + 1))
+      fi
+      if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${OPENROUTER_API_KEY:-}" ]; then
+        report ok "at least one provider key set"
+      else
+        report FAIL "no provider key set (ANTHROPIC_API_KEY / OPENROUTER_API_KEY)"
+        fails=$((fails + 1))
+      fi
+      if [ -n "${SANDBOX_GIT_TOKEN:-}" ]; then
+        report ok "SANDBOX_GIT_TOKEN set"
+      else
+        report warn "SANDBOX_GIT_TOKEN empty, non-interactive sandboxes can't push"
+      fi
+    else
+      report FAIL ".env missing at repo root (cp .env.example .env)"
+      fails=$((fails + 1))
+      report skip "LITELLM_MASTER_KEY (no .env)"
+      report skip "provider keys (no .env)"
+      report skip "SANDBOX_GIT_TOKEN (no .env)"
+    fi
+
+    # 6. terraform
+    if command -v terraform >/dev/null 2>&1; then
+      report ok "terraform on PATH"
+    else
+      report warn "terraform not on PATH"
+    fi
+
+    # 7-10. the running stack, skipped rather than failed when not up
+    if [ "$docker_up" -eq 1 ]; then
+      if [ -n "$(docker ps --filter name=gateway --filter status=running -q)" ]; then
+        report ok "gateway container running"
+        if curl -fsS -m 5 http://localhost:4000/v1/models \
+          -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" >/dev/null 2>&1; then
+          report ok "gateway answers /v1/models"
+        else
+          report FAIL "gateway running but /v1/models not answering"
+          fails=$((fails + 1))
+        fi
+      else
+        report skip "gateway container not running (stack not up?)"
+        report skip "gateway endpoint (gateway not running)"
+      fi
+      img="${SANDBOX_IMAGE:-agent-sandbox:latest}"
+      if docker image inspect "$img" >/dev/null 2>&1; then
+        report ok "sandbox image present ($img)"
+      else
+        report skip "sandbox image $img not built (stack not up? mercury up builds it)"
+      fi
+      # RunningFor is humanized, so match >=24 hours or any day/week/month unit
+      orphans="$(docker ps --filter label=mercury.sandbox --format '{{.Names}} (up {{.RunningFor}})' |
+        grep -E '\((up )?((2[4-9]|[3-9][0-9]|[0-9]{3,}) hours|.*(day|week|month|year))' || true)"
+      if [ -n "$orphans" ]; then
+        report warn "sandboxes running for over 24h: $(echo "$orphans" | tr '\n' ' ')"
+      else
+        report ok "no sandboxes older than 24h"
+      fi
+    else
+      report skip "gateway container (docker not reachable)"
+      report skip "gateway endpoint (docker not reachable)"
+      report skip "sandbox image (docker not reachable)"
+      report skip "orphaned sandboxes (docker not reachable)"
+    fi
+
+    [ "$fails" -eq 0 ] || exit 1
     ;;
   install)
     target="${1:-}"
