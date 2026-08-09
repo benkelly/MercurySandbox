@@ -93,7 +93,10 @@ resource "docker_network" "edge" {
 
 resource "docker_image" "cloudflared" {
   count = var.cloudflare_tunnel_token == "" ? 0 : 1
-  name  = "cloudflare/cloudflared:latest"
+  # Pinned deliberately, the tunnel is security-critical and :latest would
+  # silently change under you. To bump: pick the newest tag from
+  # https://github.com/cloudflare/cloudflared/releases and terraform apply.
+  name = "cloudflare/cloudflared:2026.7.3"
 }
 
 resource "docker_container" "cloudflared" {
