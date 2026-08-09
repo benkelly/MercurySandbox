@@ -74,7 +74,22 @@ resource "docker_image" "sandbox" {
 # Alternative (or addition) to Tailscale for remote access. Create a tunnel in
 # the Cloudflare Zero Trust dashboard, put its token in .env as
 # CLOUDFLARE_TUNNEL_TOKEN, and apply. Leave the token empty and none of this
-# is created. Route hostnames to services in the dashboard, see the README.
+# is created.
+#
+# SECURITY: cloudflared lives on its own "edge" network, deliberately NOT on
+# agentnet, so no dashboard route can reach the LiteLLM gateway even by
+# mistake. Keep it that way:
+#   - NEVER create a tunnel route to the gateway; a public gateway is your
+#     API spend behind a single bearer token
+#   - EVERY public hostname you route must have a Cloudflare Access policy
+#     in front of it
+# Tunnel routes should target host services only (hermes-webui,
+# opencode-manager) via host.docker.internal.
+
+resource "docker_network" "edge" {
+  count = var.cloudflare_tunnel_token == "" ? 0 : 1
+  name  = "edge"
+}
 
 resource "docker_image" "cloudflared" {
   count = var.cloudflare_tunnel_token == "" ? 0 : 1
@@ -92,7 +107,7 @@ resource "docker_container" "cloudflared" {
   env = ["TUNNEL_TOKEN=${var.cloudflare_tunnel_token}"]
 
   networks_advanced {
-    name = docker_network.agentnet.name
+    name = docker_network.edge[0].name
   }
 
   # Lets tunnel routes reach services on the host (hermes-webui,
