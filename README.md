@@ -1,183 +1,130 @@
 # MercurySandbox
 
-> A safe playground for autonomous coding agents.
+A safe playground for autonomous coding agents. One always-on brain, disposable hands.
 
 [![CI](https://github.com/benkelly/MercurySandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/benkelly/MercurySandbox/actions/workflows/ci.yml)
 
-An open-source sandbox for running Hermes-powered coding agents securely,
-self-hosted on any Docker host:
+MercurySandbox runs a persistent [Hermes agent](https://github.com/NousResearch/hermes-agent) that remembers everything, and hands the actual coding work to [opencode](https://opencode.ai) running inside throwaway Docker containers. Model API keys live in one gateway, sandboxes hold no credentials, and the only way work leaves a sandbox is a git branch you review.
 
-- **LiteLLM gateway** (Docker, via Terraform), one OpenAI-compatible endpoint, all API keys live here
-- **opencode sandbox image** (Docker), throwaway containers for coding tasks
-- **Hermes agent** (native on macOS), persistent brain, uses its Docker backend for isolation
-- **hermes-webui** (native), browser and mobile UI for Hermes
-- **opencode-manager** (Docker, its own compose), mobile-first PWA for opencode sessions
+## Architecture
 
-The model APIs do the heavy lifting, so a modest machine handles all of this comfortably.
+```mermaid
+flowchart TB
+    phone["Phone / laptop"]
 
-## Prerequisites
+    subgraph host["Docker host"]
+        direction TB
+        subgraph native["Native processes"]
+            hermes["Hermes agent<br/>memory in ~/.hermes"]
+            webui["hermes-webui"]
+        end
+        ocm["opencode-manager<br/>:5003"]
+        subgraph agentnet["agentnet (isolated Docker network)"]
+            gw["LiteLLM gateway<br/>:4000, holds all API keys"]
+            sb["sandbox mercury-*<br/>opencode, no credentials"]
+        end
+    end
 
-- Docker Desktop (or OrbStack, which is lighter on macOS)
-- Terraform >= 1.6 (`brew install terraform`)
-- git, curl
+    git[("Git remote")]
+    models[("Anthropic / OpenRouter / Ollama")]
 
-## Setup order
-
-Each step works on its own, so stop wherever you like and test.
-
-### 1. Gateway + sandbox image (Terraform)
-
-```bash
-cp .env.example .env        # add your real API keys
-cd terraform
-terraform init
-terraform apply
+    phone -- "Tailscale" --> webui
+    phone -- "Tailscale" --> ocm
+    phone -- "Telegram" --> hermes
+    webui --> hermes
+    hermes -- "spawns" --> sb
+    hermes --> gw
+    ocm --> gw
+    sb --> gw
+    gw --> models
+    sb -- "branch push only" --> git
 ```
 
-This creates a Docker network, builds the sandbox image, and starts LiteLLM
-on http://localhost:4000. Test it:
+The split that matters: Hermes is the only long-lived piece and `~/.hermes/` (plain markdown) is its entire brain, back that up and the whole setup is portable. Sandboxes are cattle, spawned per task, destroyed on exit.
 
-```bash
-curl http://localhost:4000/v1/models -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+## Sandbox lifecycle
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Y as You or Hermes
+    participant M as mercury sandbox
+    participant C as container mercury-*
+    participant G as gateway
+    participant R as git remote
+
+    Y->>M: repo URL + task
+    M->>C: docker run --rm, read-only root, no creds
+    C->>R: clone, checkout agent/timestamp
+    C->>G: model calls (gateway key only)
+    C->>C: opencode does the work
+    C->>R: push branch
+    C-->>M: exit, container deleted
+    Y->>R: review the branch, merge or bin it
 ```
 
-### 2. Prove the sandbox loop manually
+Every sandbox runs with `--rm`, a read-only root filesystem, tmpfs workdirs, dropped capabilities, memory and CPU caps, and network access to the gateway only. The git token is a fine-grained PAT scoped to the repos agents may touch, branch pushes only.
+
+## Quick start
 
 ```bash
-./sandbox/run-sandbox.sh https://github.com/you/some-repo.git "add a health endpoint"
+git clone https://github.com/benkelly/MercurySandbox.git && cd MercurySandbox
+cp .env.example .env      # fill in your keys
+./bin/mercury up          # terraform: network, gateway, sandbox image
+./bin/mercury doctor      # everything healthy?
+./bin/mercury sandbox https://github.com/you/some-repo.git "add a health endpoint"
 ```
 
-Spawns a throwaway container, clones the repo, runs opencode against the
-gateway, pushes a branch, self-destructs. No API keys ever enter the sandbox,
-opencode talks to LiteLLM over the Docker network.
-
-### 3. Hermes (native)
+Then, each optional and independent:
 
 ```bash
-./scripts/install-hermes.sh
+./bin/mercury install hermes    # persistent agent, native (pick its Docker backend)
+./bin/mercury install webui     # browser/mobile UI for Hermes
+./bin/mercury install ocm       # opencode-manager PWA on :5003
 ```
 
-Then run `hermes setup` and:
-- point its model provider at `http://localhost:4000/v1` with your LITELLM_MASTER_KEY
-  (OpenAI-compatible endpoint), or configure providers directly if you prefer
-- choose the **Docker** terminal backend so Hermes executes shell work inside
-  containers rather than on the host (see the Hermes docs, backend options are
-  local, Docker, SSH and others)
-- optionally set up the Telegram gateway (`hermes gateway`) for phone access
+## The mercury CLI
 
-Hermes memory lives in `~/.hermes/` as markdown. Back that directory up, it's
-the whole brain.
-
-### 4. hermes-webui (native)
-
-```bash
-./scripts/install-webui.sh
-```
-
-Auto-discovers your `~/.hermes` setup. Manage with `./ctl.sh status|logs|restart`
-from the hermes-webui directory.
-
-### 5. opencode-manager (Docker)
-
-```bash
-./scripts/install-ocm.sh
-```
-
-Opens on http://localhost:5003, first launch prompts you to create an admin
-account. Point its AI configuration at the LiteLLM gateway
-(`http://host.docker.internal:4000/v1`) so keys stay in one place. Install it
-as a PWA on your phone for push notifications when an agent needs an answer.
-
-## The `mercury` CLI
-
-`bin/mercury` wraps the common operations, add `bin/` to your PATH or symlink
-it somewhere convenient:
-
-```bash
-mercury up            # terraform init + apply: network, gateway, sandbox image
-mercury plan          # see what up would change
-mercury sandbox https://github.com/you/some-repo.git "add a health endpoint"
-mercury ps            # list running sandboxes
-mercury logs <name>   # follow a sandbox's output
-mercury exec <name>   # shell into a running sandbox
-mercury kill <name>   # stop one early (it self-deletes)
-mercury models        # list models the gateway exposes
-mercury status        # gateway container status
-mercury install hermes|webui|ocm
-mercury down          # tear it all down (refuses while sandboxes run, --force overrides)
-```
-
-Every command also works against a remote Docker host over SSH, so from a
-laptop on the tailnet:
-
-```bash
-export MERCURY_HOST=you@<host-tailscale-name>   # or -H per command
-mercury ps
-mercury sandbox https://github.com/you/some-repo.git "fix the flaky test"
-mercury exec mercury-20260809-120000            # drop into that sandbox
-```
-
-This SSHes in and runs the repo's own `mercury` there, so the interactive
-sandbox TUI and `exec` work too. Set `MERCURY_REMOTE_DIR` if the repo lives
-somewhere other than `~/MercurySandbox` on the remote.
-
-## CI/CD
-
-GitHub Actions runs on every push and pull request:
-
-- **ci.yml**: `bash -n` + shellcheck on all scripts, `terraform fmt`/`validate`,
-  hadolint on the sandbox Dockerfile, a no-push smoke build of the sandbox
-  image, and a `mercury` CLI smoke test
-- **release-image.yml**: on pushes to `main` that touch `sandbox/`, builds the
-  sandbox image for amd64 and arm64 and publishes it to GHCR as
-  `ghcr.io/benkelly/mercury-sandbox`
-
-To run sandboxes from the published image instead of the local Terraform
-build, set `SANDBOX_IMAGE` (in `.env` or the environment):
-
-```bash
-SANDBOX_IMAGE=ghcr.io/benkelly/mercury-sandbox:latest ./sandbox/run-sandbox.sh ...
-```
+| Command | Does |
+|---|---|
+| `mercury up` / `plan` / `down` | Terraform apply / plan / destroy (down refuses while sandboxes run) |
+| `mercury sandbox <url> [task] [model]` | Spawn a throwaway opencode sandbox, interactive TUI if no task given |
+| `mercury ps` / `logs` / `exec` / `kill` | Inspect and manage running sandboxes |
+| `mercury models` | List models the gateway exposes |
+| `mercury status` | Gateway container status |
+| `mercury doctor` | Health-check the whole stack |
+| `mercury install <hermes\|webui\|ocm>` | Run an install script |
+| `mercury -H you@host <cmd>` | Run any of the above on a remote host over SSH |
 
 ## Remote access
 
-Don't port forward. Install Tailscale on the Docker host and your phone/laptop,
-then reach every UI over the tailnet:
+Tailscale first: install it on the Docker host and your devices, reach every UI privately over the tailnet, expose nothing. A sample ACL policy locking personal devices to just the needed ports is in [`docs/tailscale-acl.example.json`](docs/tailscale-acl.example.json).
 
-- hermes-webui: `http://<host-tailscale-ip>:<port>`
-- opencode-manager: `http://<host-tailscale-ip>:5003`
-- Telegram works from anywhere with no extra setup
-- the `mercury` CLI: `MERCURY_HOST=you@<host> mercury ps` (SSH over the tailnet)
+A Cloudflare Tunnel is optionally supported (`CLOUDFLARE_TUNNEL_TOKEN` in `.env`) for sharing a UI beyond your tailnet, but understand the trade: a tunnel puts hostnames on the public internet, so put a Cloudflare Access policy in front of every route, and never route to the gateway. The Terraform keeps cloudflared off the gateway's network entirely so that mistake can't be made by accident.
 
-### Cloudflare Tunnel (optional)
+## Model routing
 
-Prefer Cloudflare, or want a stable public hostname? Create a tunnel in the
-Zero Trust dashboard (Networks -> Tunnels), put its token in `.env` as
-`CLOUDFLARE_TUNNEL_TOKEN`, and `terraform apply`. A `cloudflared` container
-joins the stack and is destroyed with it; leave the token empty and it never
-starts.
+`litellm/config.yaml` is the only file that knows about providers. Clients (Hermes, opencode, opencode-manager) all speak to one OpenAI-compatible endpoint and pick a model by name, so adding a provider, swapping the cheap default, or pointing a name at local Ollama is a one-file change and a `mercury up`.
 
-Route public hostnames to services in the dashboard:
+## Repo layout
 
-- host services (hermes-webui, opencode-manager): `http://host.docker.internal:<port>`
-- anything on agentnet by container name, e.g. `http://gateway:4000`
-
-Put Cloudflare Access in front of every hostname you route — these UIs drive
-agents that can push to your repos. Avoid exposing the gateway at all unless
-you need to; its master key is the only thing between the internet and your
-API spend.
+```
+bin/mercury            CLI front door
+terraform/             gateway, networks, sandbox image, optional tunnel
+litellm/config.yaml    model routing, the only place providers are named
+sandbox/               throwaway image + spawn script
+scripts/               native installers (hermes, webui, ocm) + tf env helper
+docs/                  ACL example and friends
+```
 
 ## Security model
 
-- Sandboxes: `--rm`, no credentials, read-only root, tmpfs workdir, CPU/mem
-  caps, isolated network with the gateway as the only useful egress
-- Git is the only write path out, use a fine-grained PAT or deploy key scoped
-  to the one repo, agents push branches, you merge
-- All model API keys live in LiteLLM only
-- Optionally, put the host on its own VLAN with an egress allowlist at the router
+- All provider keys live in the LiteLLM gateway, nothing else ever sees them
+- Sandboxes: no credentials, read-only root, tmpfs, capped, `--rm`, isolated network
+- Git branch push is the only write path out, you merge, agents never touch main
+- Gateway binds to localhost, remote access rides Tailscale
+- Terraform state contains keys, it's gitignored, keep it that way
 
-## Moving to another host later
+## License
 
-The Terraform is provider-agnostic Docker, so pointing it at a different
-machine is a one-line change to the provider block (ssh:// docker host), and
-Hermes installs the same way on any Linux box. `~/.hermes` moves with a copy.
+MIT
