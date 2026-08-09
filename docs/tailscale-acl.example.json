@@ -1,0 +1,44 @@
+// Minimal Tailscale ACL policy for MercurySandbox (HuJSON, so // comments
+// and trailing commas are fine). Paste into the admin console ACL editor
+// (or manage it with the tailscale GitOps action) and adapt the ports.
+//
+// The pattern: the Docker host gets tag:agent-host, personal devices may
+// reach only the stack's ports on it, and nothing grants the agent host
+// access to anything else on the tailnet.
+{
+	// Who may apply tag:agent-host to a machine. Join the Docker host with:
+	//   tailscale up --advertise-tags=tag:agent-host
+	"tagOwners": {
+		"tag:agent-host": ["autogroup:admin"],
+	},
+
+	"acls": [
+		// Personal devices -> the stack's UIs, and nothing else.
+		//   4000 = LiteLLM gateway (only if clients off-host need it)
+		//   5003 = opencode-manager
+		//   8080 = hermes-webui (adjust to the port yours picked)
+		{
+			"action": "accept",
+			"src":    ["autogroup:member"],
+			"dst": [
+				"tag:agent-host:4000",
+				"tag:agent-host:5003",
+				"tag:agent-host:8080",
+			],
+		},
+
+		// Deliberately absent: any rule with tag:agent-host as src. The agent
+		// host can be reached, it cannot reach your other devices.
+	],
+
+	// Optional: Tailscale SSH so `mercury -H you@host ...` works without
+	// managing keys. Drop this block if you SSH some other way.
+	"ssh": [
+		{
+			"action": "accept",
+			"src":    ["autogroup:member"],
+			"dst":    ["tag:agent-host"],
+			"users":  ["autogroup:nonroot"],
+		},
+	],
+}
