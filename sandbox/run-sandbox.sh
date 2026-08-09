@@ -14,14 +14,19 @@ cd "$(dirname "$0")/.."
 REPO_URL="${1:?usage: run-sandbox.sh <git-url> [task] [model]}"
 TASK="${2:-}"
 MODEL="${3:-cheap-default}"
-BRANCH="agent/$(date +%Y%m%d-%H%M%S)"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+BRANCH="agent/${STAMP}"
+NAME="mercury-${STAMP}"
 
 # Inject the PAT into the clone URL only inside the container's env, scoped
 # token, branch push only.
 AUTHED_URL="${REPO_URL/https:\/\//https://x-access-token:${SANDBOX_GIT_TOKEN}@}"
 
+# shellcheck disable=SC2054  # commas inside --tmpfs values are mount options, not element separators
 DOCKER_ARGS=(
   --rm
+  --name "${NAME}"
+  --label mercury.sandbox=1
   --network agentnet
   --read-only
   --tmpfs /tmp:rw,size=256m
@@ -39,6 +44,8 @@ DOCKER_ARGS=(
 )
 
 SETUP="git clone --depth 1 '${AUTHED_URL}' repo && cd repo && git checkout -b '${BRANCH}'"
+
+echo "sandbox container: ${NAME}  (mercury ps | logs | exec | kill)" >&2
 
 if [ -z "${TASK}" ]; then
   # Interactive: you drive the TUI, container still evaporates on exit

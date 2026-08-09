@@ -5,6 +5,24 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+[ $# -gt 0 ] || set -- help
+
+# Run any command on a remote host (the Mac mini) instead of locally:
+#   MERCURY_HOST=ben@mini mercury status     or     mercury -H ben@mini status
+# Assumes this repo is checked out on the remote at MERCURY_REMOTE_DIR
+# (default: MercurySandbox, relative to the remote home directory).
+HOST="${MERCURY_HOST:-}"
+if [ "${1:-}" = "-H" ] || [ "${1:-}" = "--host" ]; then
+  HOST="${2:?usage: mercury -H <ssh-host> <command> ...}"
+  shift 2
+  [ $# -gt 0 ] || set -- help
+fi
+if [ -n "$HOST" ]; then
+  REMOTE_DIR="${MERCURY_REMOTE_DIR:-MercurySandbox}"
+  # -t keeps interactive commands (sandbox TUI, exec) working over SSH
+  exec ssh -t "$HOST" "cd $(printf '%q' "$REMOTE_DIR") && ./bin/mercury $(printf '%q ' "$@")"
+fi
+
 usage() {
   cat <<'EOF'
 mercury — a safe playground for autonomous coding agents
@@ -15,11 +33,26 @@ Usage:
   mercury down                    terraform destroy, tear the stack down
   mercury sandbox <git-url> [task] [model]
                                   spawn a throwaway opencode sandbox
+  mercury ps                      list running sandbox containers
+  mercury logs <container>        follow a sandbox's output
+  mercury exec <container> [cmd...]
+                                  shell into a running sandbox (default: bash)
+  mercury kill <container>        stop a sandbox (it self-deletes)
   mercury models                  list models exposed by the LiteLLM gateway
   mercury status                  show the gateway container status
   mercury install <hermes|webui|ocm>
                                   run the matching install script
   mercury help                    show this help
+
+Remote:
+  Every command also runs against a remote Docker host over SSH, so you can
+  drive the Mac mini from a laptop on the tailnet:
+
+    mercury -H ben@mini status
+    MERCURY_HOST=ben@mini mercury ps
+
+  Requires this repo checked out on the remote, path set by MERCURY_REMOTE_DIR
+  (default: ~/MercurySandbox).
 EOF
 }
 
@@ -57,6 +90,24 @@ case "$cmd" in
     ;;
   sandbox)
     "$ROOT/sandbox/run-sandbox.sh" "$@"
+    ;;
+  ps)
+    docker ps --filter label=mercury.sandbox --format 'table {{.Names}}\t{{.Status}}\t{{.RunningFor}}'
+    ;;
+  logs)
+    docker logs -f "${1:?usage: mercury logs <container>}"
+    ;;
+  exec)
+    name="${1:?usage: mercury exec <container> [cmd...]}"
+    shift
+    if [ $# -eq 0 ]; then
+      docker exec -it "$name" bash
+    else
+      docker exec -it "$name" "$@"
+    fi
+    ;;
+  kill)
+    docker stop "${1:?usage: mercury kill <container>}"
     ;;
   models)
     load_env

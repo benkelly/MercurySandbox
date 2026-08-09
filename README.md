@@ -97,11 +97,29 @@ it somewhere convenient:
 mercury up            # terraform init + apply: network, gateway, sandbox image
 mercury plan          # see what up would change
 mercury sandbox https://github.com/you/some-repo.git "add a health endpoint"
+mercury ps            # list running sandboxes
+mercury logs <name>   # follow a sandbox's output
+mercury exec <name>   # shell into a running sandbox
+mercury kill <name>   # stop one early (it self-deletes)
 mercury models        # list models the gateway exposes
 mercury status        # gateway container status
 mercury install hermes|webui|ocm
 mercury down          # tear it all down
 ```
+
+Every command also works against the mini remotely over SSH, so from a laptop
+on the tailnet:
+
+```bash
+export MERCURY_HOST=ben@<mini-tailscale-name>   # or -H per command
+mercury ps
+mercury sandbox https://github.com/you/some-repo.git "fix the flaky test"
+mercury exec mercury-20260809-120000            # drop into that sandbox
+```
+
+This SSHes in and runs the repo's own `mercury` there, so the interactive
+sandbox TUI and `exec` work too. Set `MERCURY_REMOTE_DIR` if the repo lives
+somewhere other than `~/MercurySandbox` on the remote.
 
 ## CI/CD
 
@@ -129,6 +147,7 @@ reach every UI over the tailnet:
 - hermes-webui: `http://<mini-tailscale-ip>:<port>`
 - opencode-manager: `http://<mini-tailscale-ip>:5003`
 - Telegram works from anywhere with no extra setup
+- the `mercury` CLI: `MERCURY_HOST=ben@<mini> mercury ps` (SSH over the tailnet)
 
 ## Security model
 
