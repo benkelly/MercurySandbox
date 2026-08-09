@@ -4,6 +4,8 @@ A safe playground for autonomous coding agents. One always-on brain, disposable 
 
 [![CI](https://github.com/benkelly/MercurySandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/benkelly/MercurySandbox/actions/workflows/ci.yml)
 
+![MercurySandbox — Mercury in marble reaching through golden circuitry, beside pixel-fractured classical ruins](docs/banner.jpg)
+
 MercurySandbox runs a persistent [Hermes agent](https://github.com/NousResearch/hermes-agent) that remembers everything, and hands the actual coding work to [opencode](https://opencode.ai) running inside throwaway Docker containers. Model API keys live in one gateway, sandboxes hold no credentials, and the only way work leaves a sandbox is a git branch you review.
 
 ## Architecture
