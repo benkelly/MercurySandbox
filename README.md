@@ -1,6 +1,11 @@
-# agent-stack
+# MercurySandbox
 
-Self-hosted agent setup for a Mac mini (or any Docker host):
+> A safe playground for autonomous coding agents.
+
+[![CI](https://github.com/benkelly/MercurySandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/benkelly/MercurySandbox/actions/workflows/ci.yml)
+
+An open-source sandbox for running Hermes-powered coding agents securely,
+self-hosted on a Mac mini (or any Docker host):
 
 - **LiteLLM gateway** (Docker, via Terraform), one OpenAI-compatible endpoint, all API keys live here
 - **opencode sandbox image** (Docker), throwaway containers for coding tasks
@@ -82,6 +87,39 @@ Opens on http://localhost:5003, first launch prompts you to create an admin
 account. Point its AI configuration at the LiteLLM gateway
 (`http://host.docker.internal:4000/v1`) so keys stay in one place. Install it
 as a PWA on your phone for push notifications when an agent needs an answer.
+
+## The `mercury` CLI
+
+`bin/mercury` wraps the common operations, add `bin/` to your PATH or symlink
+it somewhere convenient:
+
+```bash
+mercury up            # terraform init + apply: network, gateway, sandbox image
+mercury plan          # see what up would change
+mercury sandbox https://github.com/you/some-repo.git "add a health endpoint"
+mercury models        # list models the gateway exposes
+mercury status        # gateway container status
+mercury install hermes|webui|ocm
+mercury down          # tear it all down
+```
+
+## CI/CD
+
+GitHub Actions runs on every push and pull request:
+
+- **ci.yml**: `bash -n` + shellcheck on all scripts, `terraform fmt`/`validate`,
+  hadolint on the sandbox Dockerfile, a no-push smoke build of the sandbox
+  image, and a `mercury` CLI smoke test
+- **release-image.yml**: on pushes to `main` that touch `sandbox/`, builds the
+  sandbox image for amd64 and arm64 and publishes it to GHCR as
+  `ghcr.io/benkelly/mercury-sandbox`
+
+To use the published image instead of building locally:
+
+```bash
+docker pull ghcr.io/benkelly/mercury-sandbox:latest
+docker tag ghcr.io/benkelly/mercury-sandbox:latest agent-sandbox:latest
+```
 
 ## Remote access
 

@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    name: Shell lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n on every script
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
+            bash -n "$f"
+            echo "OK: $f"
+          done < <(find . -name '*.sh' -not -path './.git/*' -print0)
+          bash -n bin/mercury && echo "OK: bin/mercury"
+      - name: shellcheck
+        # SC1091: .env is sourced at runtime and doesn't exist in CI
+        # SC2154: vars like SANDBOX_GIT_TOKEN come from that .env
+        run: shellcheck -S warning -e SC1091 -e SC2154 sandbox/run-sandbox.sh scripts/*.sh bin/mercury
+
+  terraform:
+    name: Terraform fmt and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform -chdir=terraform fmt -check -diff
+      - run: terraform -chdir=terraform init -backend=false
+      - run: terraform -chdir=terraform validate
+
+  docker:
+    name: Dockerfile lint and smoke build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: sandbox/Dockerfile
+      - uses: docker/setup-buildx-action@v3
+      - name: Smoke-build sandbox image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: sandbox
+          push: false
+          tags: mercury-sandbox:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  cli:
+    name: mercury CLI smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./bin/mercury help
+      - name: unknown command exits non-zero
+        run: |
+          if ./bin/mercury no-such-command 2>/dev/null; then
+            echo "expected failure for unknown command" >&2
+            exit 1
+          fi

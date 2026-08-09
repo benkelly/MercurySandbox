@@ -1,0 +1,5 @@
+# Deliberately unpinned: the sandbox image is throwaway and rebuilt often,
+# tracking latest tooling is the point.
+ignored:
+  - DL3008 # pin apt package versions
+  - DL3016 # pin npm package versions

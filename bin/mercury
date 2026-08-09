@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# mercury — CLI front door for MercurySandbox.
+# A safe playground for autonomous coding agents.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+  cat <<'EOF'
+mercury — a safe playground for autonomous coding agents
+
+Usage:
+  mercury up                      terraform init + apply (gateway, network, sandbox image)
+  mercury plan                    terraform plan, see what up would do
+  mercury down                    terraform destroy, tear the stack down
+  mercury sandbox <git-url> [task] [model]
+                                  spawn a throwaway opencode sandbox
+  mercury models                  list models exposed by the LiteLLM gateway
+  mercury status                  show the gateway container status
+  mercury install <hermes|webui|ocm>
+                                  run the matching install script
+  mercury help                    show this help
+EOF
+}
+
+tf() {
+  if [ -f "$ROOT/.env" ]; then
+    # shellcheck disable=SC1091
+    source "$ROOT/scripts/tf-env.sh"
+  fi
+  terraform -chdir="$ROOT/terraform" "$@"
+}
+
+load_env() {
+  if [ -f "$ROOT/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$ROOT/.env"
+    set +a
+  fi
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  up)
+    tf init -input=false
+    tf apply "$@"
+    ;;
+  plan)
+    tf init -input=false
+    tf plan "$@"
+    ;;
+  down)
+    tf destroy "$@"
+    ;;
+  sandbox)
+    "$ROOT/sandbox/run-sandbox.sh" "$@"
+    ;;
+  models)
+    load_env
+    resp="$(curl -fsS http://localhost:4000/v1/models \
+      -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}")"
+    if command -v jq >/dev/null 2>&1; then
+      jq -r '.data[].id' <<<"$resp"
+    else
+      printf '%s\n' "$resp"
+    fi
+    ;;
+  status)
+    docker ps --filter name=gateway --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+    ;;
+  install)
+    target="${1:-}"
+    case "$target" in
+      hermes) "$ROOT/scripts/install-hermes.sh" ;;
+      webui) "$ROOT/scripts/install-webui.sh" ;;
+      ocm) "$ROOT/scripts/install-ocm.sh" ;;
+      *)
+        echo "usage: mercury install <hermes|webui|ocm>" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  help | -h | --help)
+    usage
+    ;;
+  *)
+    echo "mercury: unknown command '$cmd'" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
