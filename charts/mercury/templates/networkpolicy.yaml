@@ -1,0 +1,104 @@
+{{- if .Values.sandbox.networkPolicy.enabled }}
+# Sandboxes: no ingress at all; egress to the gateway, to DNS, and to public
+# addresses on a short list of ports (git remotes, package registries).
+# Nothing inside the cluster or on private ranges is reachable.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mercury.fullname" . }}-sandbox
+  labels:
+    {{- include "mercury.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      mercury.sandbox: "1"
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "mercury.selector" . | nindent 14 }}
+              app.kubernetes.io/component: gateway
+      ports:
+        - port: 4000
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+        {{- range .Values.sandbox.networkPolicy.extraEgressCidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        {{- range .Values.sandbox.networkPolicy.egressPorts }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+---
+# The gateway: reachable from sandboxes and the controller only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mercury.gatewayName" . }}
+  labels:
+    {{- include "mercury.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mercury.selector" . | nindent 6 }}
+      app.kubernetes.io/component: gateway
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              mercury.sandbox: "1"
+        - podSelector:
+            matchLabels:
+              {{- include "mercury.selector" . | nindent 14 }}
+              app.kubernetes.io/component: controller
+      ports:
+        - port: 4000
+          protocol: TCP
+{{- if and .Values.gateway.virtualKeys.enabled .Values.gateway.virtualKeys.bundledPostgres.enabled }}
+---
+# The database: reachable from the gateway only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mercury.dbName" . }}
+  labels:
+    {{- include "mercury.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mercury.selector" . | nindent 6 }}
+      app.kubernetes.io/component: gateway-db
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "mercury.selector" . | nindent 14 }}
+              app.kubernetes.io/component: gateway
+      ports:
+        - port: 5432
+          protocol: TCP
+{{- end }}
+{{- end }}

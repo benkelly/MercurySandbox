@@ -2,10 +2,11 @@
 """mercuryd: a small HTTP API and web page over the mercury CLI.
 
 Standard library only, so it runs wherever python3 does: on the host
-(`mercury serve`), in the controller image, and inside the Home Assistant
-add-on behind ingress. Everything that touches Docker goes through the same
-`mercury` CLI and `docker` commands a person would run, so there is exactly
-one definition of how a sandbox is hardened (lib/sandbox.sh).
+(`mercury serve`), in the controller image, inside the Home Assistant add-on
+behind ingress, and in the Helm chart. Everything that touches a sandbox goes
+through the `mercury` CLI, so there is exactly one definition of how a
+sandbox is hardened (lib/sandbox.sh) and the backend (Docker or Kubernetes)
+is the CLI's business, not this file's.
 
 Endpoints (all JSON unless noted):
   GET    /                      the web page
@@ -13,7 +14,7 @@ Endpoints (all JSON unless noted):
   GET    /api/status            docker, gateway, models and sandboxes in one call
   GET    /api/models            model names the gateway exposes
   GET    /api/sandboxes         running sandboxes
-  POST   /api/sandboxes         {repo, task, model?, branch?, base?} -> {name}
+  POST   /api/sandboxes         {repo, task, model?, branch?, base?, context?, open_pr?} -> {name}
   GET    /api/sandboxes/<name>/logs?tail=N   text/plain
   DELETE /api/sandboxes/<name>  stop it (it self-deletes)
 
@@ -32,7 +33,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import subprocess
 import sys
 import urllib.error
@@ -53,6 +53,7 @@ MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,120}$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,200}$")
 REPO_RE = re.compile(r"^(https?://|ssh://|git@)[^\s'\"`$;|&<>]+$")
 MAX_TASK = 8000
+MAX_CONTEXT = 20000
 
 
 class Config:
@@ -66,6 +67,8 @@ class Config:
         self.ingress_only = env.get("MERCURY_INGRESS_ONLY", "0") == "1"
         self.master_key = env.get("LITELLM_MASTER_KEY", "")
         self.default_model = env.get("SANDBOX_DEFAULT_MODEL", "cheap-default")
+        self.backend = env.get("SANDBOX_BACKEND", "docker")
+        self.virtual_keys = env.get("MERCURY_VIRTUAL_KEYS", "0") == "1"
         in_container = env.get("MERCURY_IN_CONTAINER", "0") == "1"
         self.gateway_url = env.get("MERCURY_GATEWAY_URL") or (
             "http://gateway:4000/v1"
@@ -101,6 +104,8 @@ def validate_spawn(body: dict, default_model: str) -> dict:
     model = str(body.get("model") or default_model).strip()
     branch = str(body.get("branch", "")).strip()
     base = str(body.get("base", "")).strip()
+    context = str(body.get("context", "") or "").strip()
+    open_pr = body.get("open_pr", False)
     if not REPO_RE.match(repo):
         raise BadRequest("repo must be an https://, ssh:// or git@ URL")
     if not task:
@@ -113,7 +118,12 @@ def validate_spawn(body: dict, default_model: str) -> dict:
         raise BadRequest("branch name contains unexpected characters")
     if base and not BRANCH_RE.match(base):
         raise BadRequest("base branch name contains unexpected characters")
-    return {"repo": repo, "task": task, "model": model, "branch": branch, "base": base}
+    if len(context) > MAX_CONTEXT:
+        raise BadRequest(f"context is longer than {MAX_CONTEXT} characters")
+    if not isinstance(open_pr, bool):
+        raise BadRequest("open_pr must be true or false")
+    return {"repo": repo, "task": task, "model": model, "branch": branch, "base": base,
+            "context": context, "open_pr": open_pr}
 
 
 def validate_name(name: str) -> str:
@@ -137,38 +147,14 @@ class Runner:
             full_env.update(env)
         return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=full_env, check=False)
 
-    def docker_ok(self) -> bool:
-        if not shutil.which("docker"):
-            return False
-        return self.run(["docker", "info"], timeout=15).returncode == 0
+    def backend_ok(self) -> bool:
+        return self.run([self.cfg.mercury, "ps", "--json"], timeout=30).returncode == 0
 
     def sandboxes(self) -> list[dict]:
-        ids = self.run(["docker", "ps", "-q", "--filter", "label=mercury.sandbox"], timeout=20)
-        if ids.returncode != 0:
-            raise RuntimeError(ids.stderr.strip() or "docker ps failed")
-        id_list = ids.stdout.split()
-        if not id_list:
-            return []
-        inspect = self.run(["docker", "inspect", *id_list], timeout=20)
-        if inspect.returncode != 0:
-            raise RuntimeError(inspect.stderr.strip() or "docker inspect failed")
-        out = []
-        for c in json.loads(inspect.stdout):
-            labels = c.get("Config", {}).get("Labels", {}) or {}
-            state = c.get("State", {})
-            out.append(
-                {
-                    "name": c.get("Name", "").lstrip("/"),
-                    "status": state.get("Status"),
-                    "started": state.get("StartedAt"),
-                    "repo": labels.get("mercury.repo", ""),
-                    "branch": labels.get("mercury.branch", ""),
-                    "model": labels.get("mercury.model", ""),
-                    "task": labels.get("mercury.task", ""),
-                }
-            )
-        out.sort(key=lambda s: s["started"] or "", reverse=True)
-        return out
+        p = self.run([self.cfg.mercury, "ps", "--json"], timeout=30)
+        if p.returncode != 0:
+            raise RuntimeError(p.stderr.strip().splitlines()[-1] if p.stderr.strip() else "mercury ps failed")
+        return json.loads(p.stdout or "[]")
 
     def spawn(self, fields: dict) -> str:
         argv = [self.cfg.mercury, "sandbox", "--detach", "--model", fields["model"]]
@@ -176,25 +162,29 @@ class Runner:
             argv += ["--branch", fields["branch"]]
         if fields["base"]:
             argv += ["--base", fields["base"]]
+        if fields["context"]:
+            argv += ["--context", fields["context"]]
+        if fields["open_pr"]:
+            argv += ["--open-pr"]
         argv += ["--", fields["repo"], fields["task"]]
         p = self.run(argv, timeout=120)
         if p.returncode != 0:
             raise RuntimeError(p.stderr.strip().splitlines()[-1] if p.stderr.strip() else "spawn failed")
         name = p.stdout.strip().splitlines()[-1] if p.stdout.strip() else ""
         if not NAME_RE.match(name):
-            raise RuntimeError("spawn returned no container name")
+            raise RuntimeError("spawn returned no sandbox name")
         return name
 
     def logs(self, name: str, tail: int) -> str:
-        p = self.run(["docker", "logs", "--tail", str(tail), name], timeout=30)
+        p = self.run([self.cfg.mercury, "logs", "--tail", str(tail), "--no-follow", name], timeout=30)
         if p.returncode != 0:
-            raise RuntimeError(p.stderr.strip() or "docker logs failed")
+            raise RuntimeError(p.stderr.strip() or "mercury logs failed")
         return p.stdout + p.stderr
 
     def kill(self, name: str) -> None:
-        p = self.run(["docker", "stop", "-t", "10", name], timeout=40)
+        p = self.run([self.cfg.mercury, "kill", name], timeout=40)
         if p.returncode != 0:
-            raise RuntimeError(p.stderr.strip() or "docker stop failed")
+            raise RuntimeError(p.stderr.strip() or "mercury kill failed")
 
     def models(self) -> list[str]:
         req = urllib.request.Request(
@@ -324,16 +314,17 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- composite --
     def status(self) -> dict:
-        docker = self.runner.docker_ok()
+        backend = self.runner.backend_ok()
         gw_ok, gw_msg = self.runner.gateway_ok()
         models = self.runner.models() if gw_ok else []
-        sandboxes = self.runner.sandboxes() if docker else []
+        sandboxes = self.runner.sandboxes() if backend else []
         return {
             "version": self.server_version.split("/", 1)[1],
-            "docker": docker,
+            "backend": {"ok": backend, "name": self.cfg.backend},
             "gateway": {"ok": gw_ok, "detail": gw_msg, "url": self.cfg.gateway_url},
             "models": models,
             "default_model": self.cfg.default_model,
+            "virtual_keys": self.cfg.virtual_keys,
             "sandboxes": sandboxes,
             "auth": "token" if self.cfg.token else ("ingress" if self.cfg.ingress_only else "open"),
         }

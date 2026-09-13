@@ -40,10 +40,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: docker compose config (default and tunnel profile)
+      - name: docker compose config (default, tunnel profile, virtual keys override)
         run: |
           docker compose -f compose.yaml --env-file .env.example config -q
           COMPOSE_PROFILES=tunnel docker compose -f compose.yaml --env-file .env.example config --services | grep -qx cloudflared
+          LITELLM_DB_PASSWORD=pw docker compose -f compose.yaml -f compose.keys.yaml \
+            --env-file .env.example config --services | grep -qx gateway-db
+
+  helm:
+    name: Helm chart lint and schema check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: helm lint, defaults and everything enabled
+        run: |
+          set -euo pipefail
+          helm lint charts/mercury --set secrets.litellmMasterKey=sk-ci
+          helm lint charts/mercury --set secrets.litellmMasterKey=sk-ci \
+            --set gateway.virtualKeys.enabled=true --set gateway.virtualKeys.bundledPostgres.enabled=true \
+            --set secrets.litellmDbPassword=pw --set sandbox.githubApp.appId=1 \
+            --set sandbox.githubApp.installationId=2 --set secrets.githubAppPrivateKey=pem \
+            --set sandbox.rules=x --set controller.ingress.enabled=true --set 'imagePullSecrets[0].name=ghcr'
+      - name: kubeconform on the rendered manifests
+        run: |
+          set -euo pipefail
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar -xz kubeconform
+          helm template mercury charts/mercury --namespace agents --set secrets.litellmMasterKey=sk-ci \
+            --set gateway.virtualKeys.enabled=true --set gateway.virtualKeys.bundledPostgres.enabled=true \
+            --set secrets.litellmDbPassword=pw --set sandbox.githubApp.appId=1 \
+            --set sandbox.githubApp.installationId=2 --set secrets.githubAppPrivateKey=pem \
+            --set sandbox.rules=x --set controller.ingress.enabled=true | ./kubeconform -strict -summary
+      - name: chart version matches VERSION
+        run: |
+          set -euo pipefail
+          v="$(cat VERSION)"
+          grep -qx "version: $v" charts/mercury/Chart.yaml
+          grep -qx "appVersion: \"$v\"" charts/mercury/Chart.yaml
 
   docker:
     name: Dockerfile lint and smoke builds

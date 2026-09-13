@@ -21,6 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN usermod -l agent -d /home/agent -m node && groupmod -n agent node
 
 COPY entrypoint.sh /usr/local/bin/mercury-entrypoint
+# Default global rules for the agent; the spawner can override with MERCURY_RULES.
+COPY AGENTS.md /etc/mercury/AGENTS.md
 
 USER agent
 WORKDIR /work

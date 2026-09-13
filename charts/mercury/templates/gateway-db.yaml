@@ -1,0 +1,91 @@
+{{- if and .Values.gateway.virtualKeys.enabled .Values.gateway.virtualKeys.bundledPostgres.enabled }}
+# A small Postgres for LiteLLM's virtual keys. Single replica, a PVC, and
+# reachable only from the gateway (see networkpolicy.yaml). Good enough for
+# key bookkeeping; bring your own database for anything more.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mercury.dbName" . }}
+  labels:
+    {{- include "mercury.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+  selector:
+    {{- include "mercury.selector" . | nindent 4 }}
+    app.kubernetes.io/component: gateway-db
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "mercury.dbName" . }}
+  labels:
+    {{- include "mercury.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway-db
+spec:
+  serviceName: {{ include "mercury.dbName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "mercury.selector" . | nindent 6 }}
+      app.kubernetes.io/component: gateway-db
+  template:
+    metadata:
+      labels:
+        {{- include "mercury.selector" . | nindent 8 }}
+        app.kubernetes.io/component: gateway-db
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: {{ .Values.gateway.virtualKeys.bundledPostgres.image | quote }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: litellm
+            - name: POSTGRES_DB
+              value: litellm
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mercury.secretName" . }}
+                  key: LITELLM_DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "litellm", "-d", "litellm"]
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.gateway.virtualKeys.bundledPostgres.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.gateway.virtualKeys.bundledPostgres.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.gateway.virtualKeys.bundledPostgres.storage }}
+{{- end }}

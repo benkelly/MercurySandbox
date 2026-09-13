@@ -59,9 +59,15 @@ sandbox_image() { printf '%s' "${SANDBOX_IMAGE:-mercury-sandbox:local}"; }
 # add-on can keep its generated .env outside the checkout.
 compose() {
   local args=(--project-name "$MERCURY_PROJECT" -f "$MERCURY_ROOT/compose.yaml")
+  # Virtual keys need the gateway database, which lives in an override file
+  # so the base stack never carries an empty DATABASE_URL.
+  [ "${MERCURY_VIRTUAL_KEYS:-0}" = "1" ] && args+=(-f "$MERCURY_ROOT/compose.keys.yaml")
   [ -f "$MERCURY_ENV_FILE" ] && args+=(--env-file "$MERCURY_ENV_FILE")
   docker compose "${args[@]}" "$@"
 }
+
+# Which backend runs sandboxes: docker (default) or kubernetes.
+sandbox_backend() { printf '%s' "${SANDBOX_BACKEND:-docker}"; }
 
 # Names of running sandbox containers, one per line.
 running_sandboxes() {

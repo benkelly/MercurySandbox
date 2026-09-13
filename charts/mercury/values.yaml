@@ -1,0 +1,149 @@
+# Default values for the mercury chart. Every secret can come from an
+# existing Secret instead of this file; see secrets.existingSecret.
+
+image:
+  controller:
+    repository: ghcr.io/benkelly/mercury
+    # Defaults to the chart's appVersion.
+    tag: ""
+    pullPolicy: IfNotPresent
+  gateway:
+    repository: ghcr.io/berriai/litellm
+    # Pinned: this container holds every provider key.
+    tag: main-v1.83.14-stable
+    pullPolicy: IfNotPresent
+  sandbox:
+    repository: ghcr.io/benkelly/mercury-sandbox
+    # Defaults to the chart's appVersion.
+    tag: ""
+imagePullSecrets: []
+
+secrets:
+  # Name of a Secret you manage yourself. Recognised keys, all optional but
+  # LITELLM_MASTER_KEY: LITELLM_MASTER_KEY, ANTHROPIC_API_KEY,
+  # OPENROUTER_API_KEY, OPENAI_API_KEY, SANDBOX_GIT_TOKEN, MERCURY_API_TOKEN,
+  # GITHUB_APP_PRIVATE_KEY, LITELLM_DB_PASSWORD, DATABASE_URL.
+  # When set, the values below are ignored and no Secret is rendered.
+  existingSecret: ""
+  litellmMasterKey: ""
+  anthropicApiKey: ""
+  openrouterApiKey: ""
+  openaiApiKey: ""
+  # Fallback git token; a GitHub App (sandbox.githubApp) is preferred.
+  sandboxGitToken: ""
+  # Bearer token for the controller API. Set it if the controller Service is
+  # reachable from anything you do not trust: it can create Jobs.
+  mercuryApiToken: ""
+  # PEM private key of the GitHub App, for per-sandbox one-repository tokens.
+  githubAppPrivateKey: ""
+  # Password for the bundled Postgres, when gateway.virtualKeys.bundledPostgres
+  # is enabled.
+  litellmDbPassword: ""
+  # Full DATABASE_URL for an external Postgres, when virtual keys are enabled
+  # without the bundled one.
+  databaseUrl: ""
+
+gateway:
+  replicas: 1
+  # LiteLLM routing. Model names here are what sandboxes ask for.
+  config: |
+    model_list:
+      - model_name: claude-sonnet
+        litellm_params:
+          model: anthropic/claude-sonnet-4-6
+          api_key: os.environ/ANTHROPIC_API_KEY
+      - model_name: cheap-default
+        litellm_params:
+          model: openrouter/deepseek/deepseek-chat
+          api_key: os.environ/OPENROUTER_API_KEY
+    litellm_settings:
+      drop_params: true
+      telemetry: false
+    general_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
+  service:
+    port: 4000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  # Per-sandbox virtual keys (one model, a budget, an expiry) need a database.
+  virtualKeys:
+    enabled: false
+    bundledPostgres:
+      enabled: false
+      image: postgres:17-alpine
+      storage: 2Gi
+      storageClassName: ""
+      resources: {}
+
+controller:
+  replicas: 1
+  service:
+    port: 5004
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: mercury.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+sandbox:
+  defaultModel: cheap-default
+  # Docker-style sizes are accepted (2g, 512m) and converted.
+  memory: 2g
+  cpus: "2"
+  memoryRequest: 512m
+  cpusRequest: "0.25"
+  workSize: 2g
+  # Seconds before opencode is stopped; the Job's deadline is this plus 600.
+  timeout: 3600
+  # Finished Jobs are kept this long for `mercury logs`.
+  jobTtl: 3600
+  # Virtual key limits, when enabled.
+  budgetUsd: 5
+  keyTtl: 24h
+  git:
+    name: mercury-sandbox
+    email: agents@example.com
+  # A GitHub App installed on the repositories agents may touch. Each sandbox
+  # then gets a one-hour token for its one repository. The private key goes
+  # in secrets.githubAppPrivateKey.
+  githubApp:
+    appId: ""
+    installationId: ""
+  # Replace the rules baked into the sandbox image (sandbox/AGENTS.md).
+  rules: ""
+  # Sandbox Pods get no ingress, and egress only to the gateway, DNS, and the
+  # ports below on public addresses (git remotes, package registries). Set
+  # enabled: false if your CNI does not enforce NetworkPolicy anyway.
+  networkPolicy:
+    enabled: true
+    egressPorts: [443, 22]
+    # Private ranges are always excluded from the public egress rule.
+    extraEgressCidrs: []
+  # Extra pod labels/annotations, e.g. for a sidecar-free service mesh.
+  podLabels: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+rbac:
+  create: true
+
+nameOverride: ""
+fullnameOverride: ""

@@ -120,7 +120,7 @@ stack_doctor() {
   report() { printf '%-5s %s\n' "$1" "$2"; }
   fail() { report FAIL "$1"; fails=$((fails + 1)); }
 
-  report info "mercury $(mercury_version), $([ "$MERCURY_IN_CONTAINER" = 1 ] && echo 'in container' || echo 'on host')"
+  report info "mercury $(mercury_version), $([ "$MERCURY_IN_CONTAINER" = 1 ] && echo 'in container' || echo 'on host'), backend $(sandbox_backend)"
 
   if docker info >/dev/null 2>&1; then
     report ok "docker daemon reachable"
@@ -152,13 +152,39 @@ stack_doctor() {
   else
     fail "no provider key set (ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_API_KEY)"
   fi
-  if [ -n "${SANDBOX_GIT_TOKEN:-}" ]; then
-    report ok "SANDBOX_GIT_TOKEN set"
+  if creds_github_app_enabled; then
+    report ok "GitHub App configured: one-hour single-repository tokens per sandbox"
+    [ -z "${GITHUB_APP_PRIVATE_KEY_FILE:-}" ] || [ -r "$GITHUB_APP_PRIVATE_KEY_FILE" ] ||
+      fail "GITHUB_APP_PRIVATE_KEY_FILE=$GITHUB_APP_PRIVATE_KEY_FILE not readable"
+  elif [ -n "${SANDBOX_GIT_TOKEN:-}" ]; then
+    report ok "SANDBOX_GIT_TOKEN set (every sandbox gets the same token; a GitHub App narrows it)"
   else
-    report warn "SANDBOX_GIT_TOKEN empty, non-interactive sandboxes cannot push"
+    report warn "no git token: sandboxes can clone public repos but never push"
+  fi
+  if creds_virtual_keys_enabled; then
+    report ok "virtual keys on: each sandbox gets one model, \$${SANDBOX_BUDGET_USD:-5}, ${SANDBOX_KEY_TTL:-24h}"
+    [ -n "${LITELLM_DB_PASSWORD:-}" ] || [ "$(sandbox_backend)" = kubernetes ] ||
+      fail "MERCURY_VIRTUAL_KEYS=1 needs LITELLM_DB_PASSWORD for the gateway database"
+  else
+    report warn "virtual keys off: every sandbox holds the gateway master key (MERCURY_VIRTUAL_KEYS=1)"
+  fi
+  if [ -n "${SANDBOX_RULES_FILE:-}" ]; then
+    [ -r "$SANDBOX_RULES_FILE" ] && report ok "agent rules from $SANDBOX_RULES_FILE" ||
+      fail "SANDBOX_RULES_FILE=$SANDBOX_RULES_FILE not readable"
   fi
 
-  if [ "$docker_up" -eq 1 ]; then
+  if [ "$(sandbox_backend)" = kubernetes ]; then
+    if backend_ok; then
+      report ok "kubernetes: may create jobs in $(kube_ns)"
+    else
+      fail "kubernetes: cannot create jobs in $(kube_ns) (kubectl auth can-i create jobs)"
+    fi
+    if curl -fsS -m 5 "$(gateway_url)/models" -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" >/dev/null 2>&1; then
+      report ok "gateway answers $(gateway_url)/models"
+    else
+      fail "gateway not answering at $(gateway_url)/models"
+    fi
+  elif [ "$docker_up" -eq 1 ]; then
     if [ -n "$(docker ps --filter name='^mercury-gateway$' --filter status=running -q)" ]; then
       report ok "gateway container running"
       if curl -fsS -m 5 "$(gateway_url)/models" \

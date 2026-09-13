@@ -34,6 +34,10 @@ flowchart LR
 
 Drop a copy of `gateway/config.yaml` at `/addon_configs/<slug>/litellm.yaml` (the add-on writes `litellm.example.yaml` next to it to start from) and restart. The add-on copies it into the gateway build context, so the same mechanism that works on a laptop works here.
 
+## Least privilege on Home Assistant
+
+`virtual_keys` starts a small Postgres beside the gateway (its password is generated once into add-on storage) so every sandbox gets its own budgeted, expiring gateway key. `github_app_id` and `github_app_installation_id` with the App's private key at `/addon_configs/<slug>/github-app.pem` give every sandbox a one-hour token for its one repository. An `AGENTS.md` in the same folder replaces the agent rules baked into the sandbox image; the add-on writes `AGENTS.example.md` next to it.
+
 ## Reaching the gateway from elsewhere
 
 By default the gateway is published on the host's loopback only, which from Home Assistant's point of view is nearly useless: nothing else runs on that host. The `expose_gateway` option publishes it on all host interfaces instead, for a Hermes or opencode-manager on another machine. Do that only on a network you trust, or better, one you reach over Tailscale.

@@ -10,8 +10,17 @@ export MERCURY_ROOT
 source "$MERCURY_ROOT/lib/common.sh"
 # shellcheck source=lib/stack.sh
 source "$MERCURY_ROOT/lib/stack.sh"
+# shellcheck source=lib/creds.sh
+source "$MERCURY_ROOT/lib/creds.sh"
 # shellcheck source=lib/sandbox.sh
 source "$MERCURY_ROOT/lib/sandbox.sh"
+case "$(sandbox_backend)" in
+  docker | kubernetes)
+    # shellcheck source=lib/backend-docker.sh
+    source "$MERCURY_ROOT/lib/backend-$(sandbox_backend).sh"
+    ;;
+  *) die "SANDBOX_BACKEND must be docker or kubernetes, not '$(sandbox_backend)'" ;;
+esac
 
 [ $# -gt 0 ] || set -- help
 
@@ -42,13 +51,13 @@ Stack (docker compose: gateway, controller, optional tunnel):
   mercury status                  stack containers and running sandboxes
   mercury doctor                  read-only health checks on the whole stack
   mercury models                  list models the gateway exposes
-  mercury logs <gateway|mercury|cloudflared|sandbox-name>
+  mercury logs [--tail N] [--no-follow] <gateway|mercury|cloudflared|sandbox-name>
 
 Sandboxes (throwaway opencode containers, one repo and one task each):
   mercury sandbox <git-url> [task] [model]
                                   spawn one; no task = interactive TUI
   mercury sandbox -d ...          spawn in the background (see sandbox --help)
-  mercury ps                      list running sandboxes
+  mercury ps [--json]             list running sandboxes
   mercury exec <name> [cmd...]    shell into a running sandbox (default: bash)
   mercury kill <name>             stop a sandbox (it self-deletes)
 
@@ -58,6 +67,11 @@ Other:
                                   run the matching native install script
   mercury version                 print the version
   mercury help                    show this help
+
+Backends:
+  SANDBOX_BACKEND=docker (default) runs sandboxes as containers on the Docker
+  the controller can see; SANDBOX_BACKEND=kubernetes runs them as Jobs in the
+  controller's namespace (see charts/mercury).
 
 Remote:
   Every command also runs against a remote Docker host over SSH:
@@ -79,31 +93,44 @@ case "$cmd" in
   doctor) stack_doctor ;;
   models) stack_models ;;
   logs)
-    target="${1:?usage: mercury logs <gateway|mercury|cloudflared|sandbox-name>}"
-    shift
+    tail=all follow=1
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --tail) tail="${2:?--tail needs a number}"; shift ;;
+        --no-follow) follow=0 ;;
+        *) break ;;
+      esac
+      shift
+    done
+    target="${1:?usage: mercury logs [--tail N] [--no-follow] <gateway|mercury|cloudflared|sandbox-name>}"
     case "$target" in
-      gateway | mercury | cloudflared)
+      gateway | mercury | cloudflared | gateway-db)
         load_env
-        compose logs -f "$@" "$target"
+        args=(logs --tail "$tail")
+        [ "$follow" -eq 1 ] && args+=(-f)
+        compose "${args[@]}" "$target"
         ;;
-      *) docker logs -f "$@" "$target" ;;
+      *) backend_logs "$target" "$tail" "$follow" ;;
     esac
     ;;
   sandbox) sandbox_run "$@" ;;
   ps)
-    docker ps --filter label=mercury.sandbox \
-      --format 'table {{.Names}}\t{{.Status}}\t{{.Label "mercury.branch"}}\t{{.Label "mercury.repo"}}'
+    if [ "${1:-}" = "--json" ]; then
+      backend_list_json
+    else
+      backend_ps
+    fi
     ;;
   exec)
     name="${1:?usage: mercury exec <name> [cmd...]}"
     shift
     if [ $# -eq 0 ]; then
-      docker exec -it "$name" bash
+      backend_exec "$name" bash
     else
-      docker exec -it "$name" "$@"
+      backend_exec "$name" "$@"
     fi
     ;;
-  kill) docker stop -t 10 "${1:?usage: mercury kill <name>}" ;;
+  kill) backend_kill "${1:?usage: mercury kill <name>}" ;;
   serve)
     load_env
     exec python3 "$MERCURY_ROOT/mercuryd/server.py" "$@"

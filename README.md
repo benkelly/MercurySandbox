@@ -8,7 +8,7 @@ A safe playground for autonomous coding agents. One always-on brain, disposable 
 
 MercurySandbox runs a persistent [Hermes agent](https://github.com/NousResearch/hermes-agent) that remembers everything, and hands the actual coding work to [opencode](https://opencode.ai) running inside throwaway Docker containers. Model API keys live in one gateway, sandboxes hold no credentials, and the only way work leaves a sandbox is a git branch you review.
 
-The whole stack is a `compose.yaml` plus one small controller, so the same thing runs on a laptop, on a server over Tailscale, or as a [Home Assistant add-on](https://github.com/benkelly/ha-addons/tree/main/mercury-sandbox).
+The whole stack is a `compose.yaml` plus one small controller, so the same thing runs on a laptop, on a server over Tailscale, as a [Home Assistant add-on](https://github.com/benkelly/ha-addons/tree/main/mercury-sandbox), or on Kubernetes with the [Helm chart](charts/mercury), where sandboxes become Jobs.
 
 ## Architecture
 
@@ -77,7 +77,20 @@ sequenceDiagram
     Y->>R: review the branch, merge or bin it
 ```
 
-Every sandbox runs with `--rm`, a read-only root filesystem, tmpfs workdirs, dropped capabilities, no-new-privileges, a pids limit, memory and CPU caps, and network access to the gateway's network only. The git token is a fine-grained PAT scoped to the repos agents may touch, branch pushes only, and it reaches git through a credential helper so it is never written to disk or into a URL. All of that is defined once, in [`lib/sandbox.sh`](lib/sandbox.sh); the container side is [`sandbox/entrypoint.sh`](sandbox/entrypoint.sh).
+Every sandbox runs with `--rm`, a read-only root filesystem, tmpfs workdirs, dropped capabilities, no-new-privileges, a pids limit, memory and CPU caps, a time limit, and network access to the gateway's network only. What a sandbox gets is defined once, in [`lib/sandbox.sh`](lib/sandbox.sh); how it runs is a backend ([Docker](lib/backend-docker.sh) or [Kubernetes](lib/backend-kube.sh)); the container side is [`sandbox/entrypoint.sh`](sandbox/entrypoint.sh).
+
+### Least privilege
+
+With nothing configured, a sandbox holds the gateway master key and your git token. Two optional features narrow that to what one task needs:
+
+- **Virtual keys** (`MERCURY_VIRTUAL_KEYS=1`): the controller mints a LiteLLM key per sandbox, limited to the one model, a dollar budget and an expiry. The master key never enters a sandbox.
+- **GitHub App tokens** (`GITHUB_APP_*`): the controller mints a one-hour installation token per sandbox for its one repository. `SANDBOX_GIT_TOKEN` becomes a fallback for repositories off GitHub.
+
+The token still reaches git through a credential helper, never a URL or a file. Details and the blast-radius comparison are in [docs/architecture.md](docs/architecture.md#least-privilege-what-a-sandbox-is-handed).
+
+### Context
+
+Each sandbox reads a global `AGENTS.md` explaining the harness (branch exists, commit and push are handled, time and budget limits, read the repo's own instructions, finish with a reviewer summary), replaceable with `SANDBOX_RULES_FILE`. Per task, `--context` (or the context box on the page) appends links, constraints and how to test. `--open-pr` opens the pull request for you when the run pushes.
 
 ## Quick start
 
@@ -110,7 +123,7 @@ Requirements: Docker with the compose plugin, bash, curl. `jq` is nice to have.
 | `mercury status` / `doctor` / `models` | Stack containers and sandboxes / health checks / models the gateway exposes |
 | `mercury logs <gateway\|mercury\|name>` | Follow a service or a sandbox |
 | `mercury sandbox <url> [task] [model]` | Spawn a throwaway opencode sandbox, interactive TUI if no task |
-| `mercury sandbox -d ...` | Same, in the background; `--shell`, `--branch`, `--base`, `--no-push` in `--help` |
+| `mercury sandbox -d ...` | Same, in the background; `--context`, `--timeout`, `--budget`, `--open-pr`, `--branch`, `--base`, `--no-push`, `--shell` in `--help` |
 | `mercury ps` / `exec` / `kill` | Inspect and manage running sandboxes |
 | `mercury serve` | Run mercuryd on the host instead of in the container |
 | `mercury install <hermes\|webui\|ocm>` | Run a native install script |
@@ -125,7 +138,7 @@ Requirements: Docker with the compose plugin, bash, curl. `jq` is nice to have.
 | `GET /api/status` | Docker, gateway, models and sandboxes in one call |
 | `GET /api/models` | Model names from the gateway |
 | `GET /api/sandboxes` | Running sandboxes with repo, branch, model and task |
-| `POST /api/sandboxes` | `{"repo", "task", "model"?, "branch"?, "base"?}`, returns the container name |
+| `POST /api/sandboxes` | `{"repo", "task", "model"?, "branch"?, "base"?, "context"?, "open_pr"?}`, returns the sandbox name |
 | `GET /api/sandboxes/<name>/logs?tail=N` | Plain-text logs |
 | `DELETE /api/sandboxes/<name>` | Stop a sandbox |
 
@@ -134,6 +147,10 @@ It binds to loopback by default. If it ever leaves loopback, set `MERCURY_API_TO
 ## Home Assistant
 
 The [mercury-sandbox add-on](https://github.com/benkelly/ha-addons/tree/main/mercury-sandbox) is this controller image with a `run.sh` that turns add-on options into `.env`, brings the gateway up as a sibling container on the host's Docker, and serves the web page through ingress. How that works, and what `docker_api` costs, is in [docs/home-assistant.md](docs/home-assistant.md).
+
+## Kubernetes
+
+`helm install mercury charts/mercury` gives you the gateway and the controller as Deployments and every sandbox as a hardened Job with its own Secret, a deadline and a NetworkPolicy. See [docs/kubernetes.md](docs/kubernetes.md).
 
 ## Remote access
 
@@ -152,6 +169,7 @@ A Cloudflare Tunnel is optionally supported (`CLOUDFLARE_TUNNEL_TOKEN` in `.env`
 | `ghcr.io/benkelly/mercury` | `Dockerfile` (Alpine, docker-cli, compose, mercuryd) | `edge` on main, `X.Y.Z` and `latest` on tag `vX.Y.Z` |
 | `ghcr.io/benkelly/mercury-sandbox` | `sandbox/Dockerfile` (node, opencode) | same |
 | `mercury-gateway:local` | `gateway/Dockerfile` (pinned LiteLLM + your config) | built locally by `mercury up`, never published |
+| `charts/mercury` | Helm chart, version follows `VERSION` | install from the checkout |
 
 Cut a release by bumping `VERSION`, tagging `vX.Y.Z` and pushing the tag. The workflow refuses a tag that disagrees with `VERSION`.
 
@@ -159,10 +177,11 @@ Cut a release by bumping `VERSION`, tagging `vX.Y.Z` and pushing the tag. The wo
 
 ```
 bin/mercury            CLI front door
-lib/                   common.sh (env, paths), stack.sh (compose), sandbox.sh (docker run flags)
-compose.yaml           gateway, controller, optional tunnel
+lib/                   common.sh, stack.sh (compose), sandbox.sh (the spec), creds.sh, backend-*.sh
+compose.yaml           gateway, controller, optional tunnel; compose.keys.yaml adds the key database
+charts/mercury         Helm chart: the same stack with sandboxes as Jobs
 gateway/               pinned LiteLLM image + config.yaml, the only place providers are named
-sandbox/               throwaway image + entrypoint (clone, run, commit, push)
+sandbox/               throwaway image, entrypoint (clone, run, commit, push, PR) and AGENTS.md rules
 mercuryd/              HTTP API + web page over the CLI, and its tests
 Dockerfile             the controller image (also the add-on base)
 scripts/               native installers (hermes, webui, ocm)
@@ -172,7 +191,7 @@ docs/                  architecture, Home Assistant notes, Tailscale ACL example
 ## Security model
 
 - All provider keys live in the gateway, nothing else ever sees them
-- Sandboxes: no credentials, read-only root, tmpfs, capped, `--rm`, isolated network, token via credential helper only
+- Sandboxes: read-only root, tmpfs, capped, timed, `--rm`, isolated network, and at most a per-sandbox model key and a one-hour single-repo git token
 - Git branch push is the only write path out, you merge, agents never touch main
 - Gateway and mercuryd bind to loopback, remote access rides Tailscale
 - The controller holds the Docker socket, which is root on the host: treat its port like SSH

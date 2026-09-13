@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Entrypoint of the throwaway sandbox image. Everything a sandbox does lives
 # here, driven by environment variables, so whoever spawns it (the mercury
-# CLI, mercuryd, the Home Assistant add-on, Hermes) only has to set env and
-# run the image.
+# CLI, mercuryd, the Home Assistant add-on, a Kubernetes Job) only has to set
+# env and run the image.
 #
 #   MERCURY_REPO_URL     repo to clone (required)
 #   MERCURY_TASK         prompt for opencode; empty means interactive TUI
+#   MERCURY_CONTEXT      extra context appended to the prompt
+#   MERCURY_RULES        global instructions for the agent; empty uses the
+#                        rules baked into the image (/etc/mercury/AGENTS.md)
 #   MERCURY_MODEL        gateway model name (default cheap-default)
 #   MERCURY_BRANCH       branch to create and push (default agent/<timestamp>)
 #   MERCURY_BASE_BRANCH  branch to clone instead of the remote default
+#   MERCURY_TIMEOUT      seconds before opencode is stopped (default 3600)
 #   MERCURY_PUSH         0 to commit without pushing
+#   MERCURY_OPEN_PR      1 to open a GitHub pull request after pushing
 #   MERCURY_GIT_TOKEN    token for https remotes, served through a credential
 #                        helper so it is never written to disk or into a URL
 #   OPENAI_BASE_URL/OPENAI_API_KEY  the gateway, as opencode expects them
@@ -24,6 +29,7 @@ fi
 : "${MERCURY_REPO_URL:?MERCURY_REPO_URL is required}"
 MODEL="${MERCURY_MODEL:-cheap-default}"
 BRANCH="${MERCURY_BRANCH:-agent/$(date +%Y%m%d-%H%M%S)}"
+TIMEOUT="${MERCURY_TIMEOUT:-3600}"
 WORK=/work/repo
 
 say() { printf '\n--- %s ---\n' "$*"; }
@@ -38,11 +44,20 @@ if [ -n "${MERCURY_GIT_TOKEN:-}" ]; then
     '!f() { echo "username=x-access-token"; echo "password=${MERCURY_GIT_TOKEN}"; }; f'
 fi
 
+# Global rules for opencode, outside the repo so they are never committed.
+mkdir -p "$HOME/.config/opencode"
+if [ -n "${MERCURY_RULES:-}" ]; then
+  printf '%s\n' "$MERCURY_RULES" > "$HOME/.config/opencode/AGENTS.md"
+elif [ -f /etc/mercury/AGENTS.md ]; then
+  cp /etc/mercury/AGENTS.md "$HOME/.config/opencode/AGENTS.md"
+fi
+
 say "cloning ${MERCURY_REPO_URL}"
 clone_args=(--depth 1)
 [ -n "${MERCURY_BASE_BRANCH:-}" ] && clone_args+=(--branch "$MERCURY_BASE_BRANCH")
 git clone "${clone_args[@]}" "$MERCURY_REPO_URL" "$WORK"
 cd "$WORK"
+BASE_BRANCH="${MERCURY_BASE_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 git checkout -q -b "$BRANCH"
 
 if [ -z "${MERCURY_TASK:-}" ]; then
@@ -50,13 +65,28 @@ if [ -z "${MERCURY_TASK:-}" ]; then
   exec opencode
 fi
 
-say "opencode (${MODEL}): ${MERCURY_TASK}"
-opencode run --model "openai/${MODEL}" "$MERCURY_TASK"
+PROMPT="$MERCURY_TASK"
+if [ -n "${MERCURY_CONTEXT:-}" ]; then
+  PROMPT="${PROMPT}
+
+## Context
+
+${MERCURY_CONTEXT}"
+fi
+
+say "opencode (${MODEL}, ${TIMEOUT}s limit): ${MERCURY_TASK}"
+rc=0
+timeout -k 30 "$TIMEOUT" opencode run --model "openai/${MODEL}" "$PROMPT" || rc=$?
+if [ "$rc" -eq 124 ]; then
+  say "opencode hit the ${TIMEOUT}s limit, keeping whatever it managed"
+elif [ "$rc" -ne 0 ]; then
+  say "opencode exited with status ${rc}, keeping whatever it managed"
+fi
 
 git add -A
 if git diff --cached --quiet; then
   say "opencode changed nothing, no branch pushed"
-  exit 0
+  exit "$rc"
 fi
 
 # Short subject, full task in the body.
@@ -70,9 +100,31 @@ git --no-pager show --stat --oneline HEAD | head -40
 
 if [ "${MERCURY_PUSH:-1}" = "0" ]; then
   say "MERCURY_PUSH=0, committed on ${BRANCH} but not pushed"
-  exit 0
+  exit "$rc"
 fi
 
 say "pushing ${BRANCH}"
 git push -u origin "$BRANCH"
 say "pushed ${BRANCH}, review and merge when happy"
+
+if [ "${MERCURY_OPEN_PR:-0}" = "1" ]; then
+  api="${GITHUB_API_URL:-https://api.github.com}"
+  case "$MERCURY_REPO_URL" in
+    https://github.com/*)
+      path="${MERCURY_REPO_URL#https://github.com/}"
+      path="${path%.git}"
+      body="$(jq -n --arg t "${subject:0:72}" --arg h "$BRANCH" --arg b "$BASE_BRANCH" \
+        --arg body "$(printf 'Task:\n\n%s\n\nOpened by a MercurySandbox run on branch `%s`. Review before merging.' "$MERCURY_TASK" "$BRANCH")" \
+        '{title: $t, head: $h, base: $b, body: $body}')"
+      if url="$(curl -fsS -m 20 -X POST "${api}/repos/${path}/pulls" \
+          -H "Authorization: Bearer ${MERCURY_GIT_TOKEN:-}" \
+          -H 'Accept: application/vnd.github+json' -d "$body" | jq -r '.html_url // empty')" && [ -n "$url" ]; then
+        say "pull request: ${url}"
+      else
+        say "could not open a pull request (does the token have pull_requests: write?), branch is pushed anyway"
+      fi
+      ;;
+    *) say "MERCURY_OPEN_PR only knows github.com https URLs, branch is pushed anyway" ;;
+  esac
+fi
+exit "$rc"

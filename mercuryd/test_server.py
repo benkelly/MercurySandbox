@@ -14,7 +14,7 @@ class FakeRunner:
         self.killed = []
         self.spawned = []
 
-    def docker_ok(self):
+    def backend_ok(self):
         return True
 
     def models(self):
@@ -43,6 +43,16 @@ class ValidationTests(unittest.TestCase):
         f = server.validate_spawn({"repo": "https://github.com/a/b.git", "task": "do it"}, "cheap-default")
         self.assertEqual(f["model"], "cheap-default")
         self.assertEqual(f["branch"], "")
+        self.assertEqual(f["context"], "")
+        self.assertFalse(f["open_pr"])
+
+    def test_spawn_context_and_pr(self):
+        f = server.validate_spawn({"repo": "https://x/y", "task": "t", "context": " notes ", "open_pr": True}, "m")
+        self.assertEqual((f["context"], f["open_pr"]), ("notes", True))
+        with self.assertRaises(server.BadRequest):
+            server.validate_spawn({"repo": "https://x/y", "task": "t", "open_pr": "yes"}, "m")
+        with self.assertRaises(server.BadRequest):
+            server.validate_spawn({"repo": "https://x/y", "task": "t", "context": "x" * 20001}, "m")
 
     def test_spawn_rejects_bad_repo(self):
         for repo in ["", "ftp://x", "https://x; rm -rf /", "file:///etc/passwd"]:
@@ -139,16 +149,17 @@ class HttpTests(unittest.TestCase):
         status, body, _ = self.call("GET", "/api/status")
         self.assertEqual(status, 200)
         data = json.loads(body)
-        self.assertTrue(data["docker"])
+        self.assertEqual(data["backend"], {"ok": True, "name": "docker"})
         self.assertEqual(data["models"], ["cheap-default", "claude-sonnet"])
         self.assertEqual(len(data["sandboxes"]), 1)
         self.assertEqual(data["auth"], "token")
 
     def test_spawn_and_kill(self):
-        status, body, _ = self.call("POST", "/api/sandboxes", {"repo": "https://x/y.git", "task": "add tests", "model": "claude-sonnet"})
+        status, body, _ = self.call("POST", "/api/sandboxes", {"repo": "https://x/y.git", "task": "add tests", "model": "claude-sonnet", "open_pr": True})
         self.assertEqual(status, 201, body)
         self.assertEqual(json.loads(body)["name"], "mercury-20260101-000000-cd34")
         self.assertEqual(self.runner.spawned[-1]["model"], "claude-sonnet")
+        self.assertTrue(self.runner.spawned[-1]["open_pr"])
         status, body, _ = self.call("DELETE", "/api/sandboxes/mercury-20260101-000000-cd34")
         self.assertEqual(status, 200)
         self.assertIn("mercury-20260101-000000-cd34", self.runner.killed)
@@ -171,3 +182,32 @@ class HttpTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RealRunnerArgvTests(unittest.TestCase):
+    """The real Runner must hand the CLI exactly the flags it understands."""
+
+    def test_spawn_argv(self):
+        calls = []
+        cfg = server.Config({"MERCURY_API_TOKEN": "t"})
+        r = server.Runner(cfg)
+
+        class P:
+            returncode = 0
+            stderr = ""
+
+            def __init__(self, argv):
+                self.stdout = "[]" if argv[1] == "ps" else "mercury-20260101-000000-ab12\n"
+
+        r.run = lambda argv, timeout=60, env=None: (calls.append(argv), P(argv))[1]
+        r.spawn({"repo": "https://x/y", "task": "t", "model": "m", "branch": "b", "base": "main",
+                 "context": "c", "open_pr": True})
+        argv = calls[-1]
+        self.assertEqual(argv[1:], ["sandbox", "--detach", "--model", "m", "--branch", "b", "--base", "main",
+                                    "--context", "c", "--open-pr", "--", "https://x/y", "t"])
+        r.logs("mercury-x", 50)
+        self.assertEqual(calls[-1][1:], ["logs", "--tail", "50", "--no-follow", "mercury-x"])
+        r.kill("mercury-x")
+        self.assertEqual(calls[-1][1:], ["kill", "mercury-x"])
+        r.sandboxes()
+        self.assertEqual(calls[-1][1:], ["ps", "--json"])

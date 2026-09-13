@@ -54,7 +54,7 @@
   <header>
     <h1>MercurySandbox <small id="version"></small></h1>
     <div class="chips">
-      <span class="chip" id="chip-docker">docker</span>
+      <span class="chip" id="chip-backend">backend</span>
       <span class="chip" id="chip-gateway">gateway</span>
       <span class="chip" id="chip-sandboxes">sandboxes</span>
     </div>
@@ -70,8 +70,10 @@
         <select name="model" id="model"></select>
       </label>
       <textarea name="task" placeholder="What should opencode do? It will clone the repo, do this, commit and push a branch for you to review." required></textarea>
+      <textarea name="context" placeholder="Optional context for the agent: links, constraints, where to look, how to test. Appended to the task." style="min-height:64px"></textarea>
       <div class="row">
         <button type="submit" id="spawn-btn">Spawn</button>
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="open_pr" style="width:auto"> open a pull request</label>
         <span class="msg" id="spawn-msg"></span>
       </div>
     </form>
@@ -123,8 +125,8 @@ function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;'
 
 function render(status) {
   $('version').textContent = status.version ? 'v' + status.version : '';
-  chip('chip-docker', status.docker, status.docker ? 'docker ok' : 'docker unreachable');
-  chip('chip-gateway', status.gateway.ok, status.gateway.ok ? 'gateway ok' : status.gateway.detail);
+  chip('chip-backend', status.backend.ok, status.backend.name + (status.backend.ok ? ' ok' : ' unreachable'));
+  chip('chip-gateway', status.gateway.ok, (status.gateway.ok ? 'gateway ok' : status.gateway.detail) + (status.virtual_keys ? ', per-sandbox keys' : ''));
   chip('chip-sandboxes', true, `${status.sandboxes.length} running`);
 
   const sel = $('model'), current = sel.value;
@@ -161,7 +163,7 @@ async function refresh() {
   try {
     render(await api('api/status'));
   } catch (e) {
-    chip('chip-docker', false, 'mercuryd: ' + e.message);
+    chip('chip-backend', false, 'mercuryd: ' + e.message);
   }
 }
 
@@ -187,9 +189,11 @@ $('spawn').addEventListener('submit', async (ev) => {
   msg.textContent = 'starting…';
   try {
     const r = await api('api/sandboxes', { method: 'POST', body: JSON.stringify({
-      repo: f.get('repo'), task: f.get('task'), model: f.get('model') }) });
+      repo: f.get('repo'), task: f.get('task'), model: f.get('model'),
+      context: f.get('context') || '', open_pr: f.get('open_pr') === 'on' }) });
     msg.textContent = `started ${r.name}`;
     ev.target.task.value = '';
+    ev.target.context.value = '';
     await refresh();
     showLogs(r.name);
   } catch (e) {

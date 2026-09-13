@@ -1,0 +1,26 @@
+MercurySandbox is installed in namespace {{ .Release.Namespace }}.
+
+Gateway (inside the cluster):  http://{{ include "mercury.gatewayName" . }}:{{ .Values.gateway.service.port }}/v1
+Controller API and web page:   http://{{ include "mercury.fullname" . }}:{{ .Values.controller.service.port }}
+
+Reach the page from your machine:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "mercury.fullname" . }} 5004:{{ .Values.controller.service.port }}
+  open http://127.0.0.1:5004
+
+Spawn a sandbox without the page:
+  kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "mercury.fullname" . }} -- \
+    mercury sandbox -d https://github.com/you/repo.git "add a health endpoint"
+  kubectl -n {{ .Release.Namespace }} get jobs -l mercury.sandbox=1
+
+{{- if not .Values.gateway.virtualKeys.enabled }}
+
+Sandboxes currently receive the gateway master key. Enable
+gateway.virtualKeys (with bundledPostgres or an external DATABASE_URL) to
+hand each sandbox its own key, limited to one model, a budget and a lifetime.
+{{- end }}
+{{- if not .Values.sandbox.githubApp.appId }}
+
+Sandboxes use secrets.sandboxGitToken for every repository. Configure
+sandbox.githubApp (and secrets.githubAppPrivateKey) to mint a one-hour token
+per sandbox, scoped to its one repository.
+{{- end }}

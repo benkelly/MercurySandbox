@@ -1,5 +1,5 @@
 # The mercury controller image: the same CLI you run on a host, packaged with
-# the Docker CLI, compose and mercuryd. It manages the stack and spawns
+# the Docker CLI, compose, kubectl (for the Kubernetes backend) and mercuryd. It manages the stack and spawns
 # sandboxes on the host's Docker through the mounted socket, which makes it
 # root-equivalent on that host: publish its port on loopback or behind
 # Tailscale only. The Home Assistant add-on builds FROM this image.
@@ -16,7 +16,9 @@ RUN apk add --no-cache \
       docker-cli-compose \
       git \
       jq \
+      kubectl \
       openssh-client-default \
+      openssl \
       python3 \
       tini
 
