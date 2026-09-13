@@ -152,7 +152,7 @@ The [mercury-sandbox add-on](https://github.com/benkelly/ha-addons/tree/main/mer
 
 ## Kubernetes
 
-`helm install mercury charts/mercury` gives you the gateway and the controller as Deployments and every sandbox as a hardened Job with its own Secret, a deadline and a NetworkPolicy. See the [Kubernetes guide](https://benkelly.github.io/MercurySandbox/docs/getting-started/kubernetes/).
+`helm install mercury oci://ghcr.io/benkelly/charts/mercury --version 0.1.0` gives you the gateway and the controller as Deployments and every sandbox as a hardened Job with its own Secret, a deadline and a NetworkPolicy. See the [Kubernetes guide](https://benkelly.github.io/MercurySandbox/docs/getting-started/kubernetes/).
 
 ## Remote access
 
@@ -171,7 +171,7 @@ A Cloudflare Tunnel is optionally supported (`CLOUDFLARE_TUNNEL_TOKEN` in `.env`
 | `ghcr.io/benkelly/mercury` | `Dockerfile` (Alpine, docker-cli, compose, mercuryd) | `edge` on main, `X.Y.Z` and `latest` on tag `vX.Y.Z` |
 | `ghcr.io/benkelly/mercury-sandbox` | `sandbox/Dockerfile` (node, opencode) | same |
 | `mercury-gateway:local` | `gateway/Dockerfile` (pinned LiteLLM + your config) | built locally by `mercury up`, never published |
-| `charts/mercury` | Helm chart, version follows `VERSION` | install from the checkout |
+| `oci://ghcr.io/benkelly/charts/mercury` | `charts/mercury`, version follows `VERSION` | `X.Y.Z` on release |
 
 Releases are cut by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`: merge its release PR and the tag, the GitHub release and the images follow. A hand-pushed `vX.Y.Z` tag works too. See [Releasing](https://benkelly.github.io/MercurySandbox/docs/operations/releasing/).
 
