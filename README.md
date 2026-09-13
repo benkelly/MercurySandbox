@@ -10,6 +10,8 @@ MercurySandbox runs a persistent [Hermes agent](https://github.com/NousResearch/
 
 The whole stack is a `compose.yaml` plus one small controller, so the same thing runs on a laptop, on a server over Tailscale, as a [Home Assistant add-on](https://github.com/benkelly/ha-addons/tree/main/mercury-sandbox), or on Kubernetes with the [Helm chart](charts/mercury), where sandboxes become Jobs.
 
+**Docs: [benkelly.github.io/MercurySandbox](https://benkelly.github.io/MercurySandbox/)**, with getting-started guides for each of those, the concepts, and a full reference. The source is in [`site/`](site/).
+
 ## Architecture
 
 ```mermaid
@@ -54,7 +56,7 @@ Three long-lived pieces, each with one job:
 - **mercury controller**: the `mercury` CLI packaged with the Docker CLI and `mercuryd`, a small HTTP API and web page. It spawns sandboxes on the host's Docker through the socket. Same code as `bin/mercury`, same image as the Home Assistant add-on.
 - **Hermes** (optional, native): the agent with memory. `~/.hermes/` (plain markdown) is its entire brain; back that up and the whole setup is portable.
 
-Sandboxes are cattle: one repo and one task each, spawned by `docker run`, destroyed on exit. The full design, trust boundaries and the three deployment shapes are in [docs/architecture.md](docs/architecture.md).
+Sandboxes are cattle: one repo and one task each, spawned by `docker run` (or as a Job), destroyed on exit. The full design, trust boundaries and the four deployment shapes are in the [architecture docs](https://benkelly.github.io/MercurySandbox/docs/concepts/architecture/).
 
 ## Sandbox lifecycle
 
@@ -86,7 +88,7 @@ With nothing configured, a sandbox holds the gateway master key and your git tok
 - **Virtual keys** (`MERCURY_VIRTUAL_KEYS=1`): the controller mints a LiteLLM key per sandbox, limited to the one model, a dollar budget and an expiry. The master key never enters a sandbox.
 - **GitHub App tokens** (`GITHUB_APP_*`): the controller mints a one-hour installation token per sandbox for its one repository. `SANDBOX_GIT_TOKEN` becomes a fallback for repositories off GitHub.
 
-The token still reaches git through a credential helper, never a URL or a file. Details and the blast-radius comparison are in [docs/architecture.md](docs/architecture.md#least-privilege-what-a-sandbox-is-handed).
+The token still reaches git through a credential helper, never a URL or a file. Setup and the blast-radius comparison are in [Locking down credentials](https://benkelly.github.io/MercurySandbox/docs/concepts/credentials/).
 
 ### Context
 
@@ -146,11 +148,11 @@ It binds to loopback by default. If it ever leaves loopback, set `MERCURY_API_TO
 
 ## Home Assistant
 
-The [mercury-sandbox add-on](https://github.com/benkelly/ha-addons/tree/main/mercury-sandbox) is this controller image with a `run.sh` that turns add-on options into `.env`, brings the gateway up as a sibling container on the host's Docker, and serves the web page through ingress. How that works, and what `docker_api` costs, is in [docs/home-assistant.md](docs/home-assistant.md).
+The [mercury-sandbox add-on](https://github.com/benkelly/ha-addons/tree/main/mercury-sandbox) is this controller image with a `run.sh` that turns add-on options into `.env`, brings the gateway up as a sibling container on the host's Docker, and serves the web page through ingress. How that works, and what `docker_api` costs, is in the [Home Assistant guide](https://benkelly.github.io/MercurySandbox/docs/getting-started/home-assistant/).
 
 ## Kubernetes
 
-`helm install mercury charts/mercury` gives you the gateway and the controller as Deployments and every sandbox as a hardened Job with its own Secret, a deadline and a NetworkPolicy. See [docs/kubernetes.md](docs/kubernetes.md).
+`helm install mercury charts/mercury` gives you the gateway and the controller as Deployments and every sandbox as a hardened Job with its own Secret, a deadline and a NetworkPolicy. See the [Kubernetes guide](https://benkelly.github.io/MercurySandbox/docs/getting-started/kubernetes/).
 
 ## Remote access
 
@@ -171,7 +173,7 @@ A Cloudflare Tunnel is optionally supported (`CLOUDFLARE_TUNNEL_TOKEN` in `.env`
 | `mercury-gateway:local` | `gateway/Dockerfile` (pinned LiteLLM + your config) | built locally by `mercury up`, never published |
 | `charts/mercury` | Helm chart, version follows `VERSION` | install from the checkout |
 
-Cut a release by bumping `VERSION`, tagging `vX.Y.Z` and pushing the tag. The workflow refuses a tag that disagrees with `VERSION`.
+Releases are cut by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`: merge its release PR and the tag, the GitHub release and the images follow. A hand-pushed `vX.Y.Z` tag works too and bootstraps the first release. See [Releasing](https://benkelly.github.io/MercurySandbox/docs/operations/releasing/).
 
 ## Repo layout
 
@@ -185,7 +187,8 @@ sandbox/               throwaway image, entrypoint (clone, run, commit, push, PR
 mercuryd/              HTTP API + web page over the CLI, and its tests
 Dockerfile             the controller image (also the add-on base)
 scripts/               native installers (hermes, webui, ocm)
-docs/                  architecture, Home Assistant notes, Tailscale ACL example
+site/                  the docs site (Hugo), deployed to GitHub Pages
+docs/                  banner and the Tailscale ACL example
 ```
 
 ## Security model

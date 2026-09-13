@@ -47,6 +47,19 @@ jobs:
           LITELLM_DB_PASSWORD=pw docker compose -f compose.yaml -f compose.keys.yaml \
             --env-file .env.example config --services | grep -qx gateway-db
 
+  site:
+    name: Docs site builds and links resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: "0.152.0"
+          extended: true
+      - run: hugo --source site --gc --minify --panicOnWarning
+      - name: every internal link resolves
+        run: python3 site/check-links.py site/public /MercurySandbox/
+
   helm:
     name: Helm chart lint and schema check
     runs-on: ubuntu-latest

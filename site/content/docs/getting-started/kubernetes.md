@@ -1,4 +1,8 @@
-# Running on Kubernetes
+---
+title: Kubernetes
+weight: 4
+description: A Helm chart; sandboxes become Jobs with a NetworkPolicy, a deadline and a Secret each.
+---
 
 `charts/mercury` installs the gateway and the controller, and the controller
 runs each sandbox as a Job in the same namespace with the same hardening the
@@ -47,7 +51,7 @@ is honest about that rather than pretending.
 ## Virtual keys and GitHub Apps
 
 Both least-privilege features work the same as elsewhere (see
-[architecture.md](architecture.md)). `gateway.virtualKeys.enabled` needs a
+[architecture](/docs/concepts/architecture/)). `gateway.virtualKeys.enabled` needs a
 database: `bundledPostgres.enabled` renders a single-replica StatefulSet that
 only the gateway can reach, or set `secrets.databaseUrl` for one you run.
 `sandbox.githubApp.*` plus `secrets.githubAppPrivateKey` mints a one-hour

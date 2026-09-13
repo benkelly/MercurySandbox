@@ -1,0 +1,55 @@
+{{ define "main" }}
+<main class="splash">
+  <section class="hero">
+    <div class="hero-text">
+      <h1>A safe playground for autonomous coding agents.</h1>
+      <p class="tagline">One always-on brain, disposable hands. Model keys live in one gateway, sandboxes hold nothing, and the only way work leaves is a git branch you review.</p>
+      <p class="cta">
+        <a class="button" href="{{ "docs/getting-started/" | relURL }}">Get started</a>
+        <a class="button quiet" href="{{ "docs/concepts/architecture/" | relURL }}">How it works</a>
+        <a class="button quiet" href="{{ .Site.Params.github }}">GitHub</a>
+      </p>
+    </div>
+    <img class="hero-art" src="{{ "banner.jpg" | relURL }}" alt="Mercury in marble reaching through golden circuitry, beside pixel-fractured classical ruins">
+  </section>
+
+  <section class="cards">
+    <a class="card" href="{{ "docs/getting-started/laptop/" | relURL }}">
+      <h3>Laptop</h3>
+      <p>Docker Desktop or OrbStack, one <code>.env</code>, <code>mercury up</code>. Spawn a sandbox in five minutes.</p>
+    </a>
+    <a class="card" href="{{ "docs/getting-started/server/" | relURL }}">
+      <h3>Server</h3>
+      <p>Always on, reached over Tailscale, driven from your laptop with <code>mercury -H host</code>. Where Hermes lives.</p>
+    </a>
+    <a class="card" href="{{ "docs/getting-started/home-assistant/" | relURL }}">
+      <h3>Home Assistant</h3>
+      <p>An add-on that runs the gateway beside itself and puts the sandbox page in your sidebar.</p>
+    </a>
+    <a class="card" href="{{ "docs/getting-started/kubernetes/" | relURL }}">
+      <h3>Kubernetes</h3>
+      <p>A Helm chart. Sandboxes become Jobs with a NetworkPolicy, a deadline and a Secret each.</p>
+    </a>
+  </section>
+
+  <section class="how">
+    <h2>What happens when you hand it a task</h2>
+    {{ .Content }}
+  </section>
+
+  <section class="pillars">
+    <div>
+      <h3>Keys stay home</h3>
+      <p>Provider keys live in the LiteLLM gateway and nowhere else. With virtual keys on, a sandbox gets one model, a budget and an expiry. With a GitHub App, it gets one repository for one hour.</p>
+    </div>
+    <div>
+      <h3>Sandboxes are cattle</h3>
+      <p>Read-only root, tmpfs, dropped capabilities, memory and CPU caps, a time limit, an isolated network, <code>--rm</code>. One repository, one task, gone when done.</p>
+    </div>
+    <div>
+      <h3>One definition, four homes</h3>
+      <p>The same compose file and the same controller image run on a laptop, a server, inside a Home Assistant add-on, and on Kubernetes with sandboxes as Jobs.</p>
+    </div>
+  </section>
+</main>
+{{ end }}

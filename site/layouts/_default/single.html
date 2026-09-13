@@ -1,0 +1,20 @@
+{{ define "main" }}
+<div class="wrap">
+  {{ partial "sidebar.html" . }}
+  <main class="content">
+    <h1>{{ .Title }}</h1>
+    {{ with .Description }}<p class="lead">{{ . }}</p>{{ end }}
+    {{ .Content }}
+    <nav class="prevnext">
+      {{ with .PrevInSection }}<a href="{{ .RelPermalink }}">← {{ .Title }}</a>{{ else }}<span></span>{{ end }}
+      {{ with .NextInSection }}<a href="{{ .RelPermalink }}">{{ .Title }} →</a>{{ end }}
+    </nav>
+  </main>
+  {{ if gt (len .Fragments.Identifiers) 2 }}
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    {{ .TableOfContents }}
+  </aside>
+  {{ end }}
+</div>
+{{ end }}

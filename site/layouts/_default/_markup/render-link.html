@@ -1,0 +1,14 @@
+{{- /* Site-absolute links in content ("/docs/x/") resolve to the page so they
+       carry the base path on GitHub Pages; anything else passes through. */ -}}
+{{- $u := .Destination -}}
+{{- if hasPrefix $u "/" -}}
+  {{- $frag := "" -}}
+  {{- $path := $u -}}
+  {{- with index (split $u "#") 1 }}{{ $frag = printf "#%s" . }}{{ $path = index (split $u "#") 0 }}{{ end -}}
+  {{- with site.GetPage $path -}}
+    {{- $u = printf "%s%s" .RelPermalink $frag -}}
+  {{- else -}}
+    {{- errorf "broken link %q in %s" $u $.Page.File.Path -}}
+  {{- end -}}
+{{- end -}}
+<a href="{{ $u }}"{{ if hasPrefix .Destination "http" }} rel="noopener"{{ end }}>{{ .Text }}</a>

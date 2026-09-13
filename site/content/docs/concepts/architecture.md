@@ -1,4 +1,8 @@
-# Architecture
+---
+title: Architecture
+weight: 1
+description: Three long-lived pieces, any number of short-lived ones, and where the trust boundaries fall.
+---
 
 MercurySandbox is three long-lived pieces and any number of short-lived ones.
 

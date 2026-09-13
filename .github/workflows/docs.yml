@@ -1,0 +1,52 @@
+name: Docs site
+
+# Builds site/ with Hugo and publishes it to GitHub Pages at
+# https://benkelly.github.io/MercurySandbox/. Pull requests get a build
+# check only. Pages must be set to "GitHub Actions" as the source once, under
+# the repository's Settings -> Pages.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build with Hugo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: "0.152.0"
+          extended: true
+      - name: hugo
+        run: hugo --source site --gc --minify --panicOnWarning
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/public
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

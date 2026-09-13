@@ -1,10 +1,22 @@
-# Running under Home Assistant
+---
+title: Home Assistant
+weight: 3
+description: The add-on runs the gateway beside itself on the host's Docker and puts the sandbox page in your sidebar.
+---
 
-The [mercury-sandbox add-on](https://github.com/benkelly/ha-addons/tree/main/mercury-sandbox) is the controller image from this repository plus a `run.sh`. This page explains the mechanics; the add-on's own `DOCS.md` covers installing and the options.
+## Install
 
-## What the add-on is
+1. Add the repository `https://github.com/benkelly/ha-addons` under **Settings → Add-ons → Add-on store → Repositories**, or use the [one-click link](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbenkelly%2Fha-addons).
+2. Install **MercurySandbox**. Read the security note in its docs first: the add-on controls Docker on the host.
+3. In **Configuration**, set at least one provider key and a `git_token`. Leave `litellm_master_key` blank to have one generated.
+4. Start it and watch the log. The first start pulls the LiteLLM and sandbox images, which takes a few minutes.
+5. Open **MercurySandbox** in the sidebar: three green chips, then paste a repository and a task.
 
-A Home Assistant add-on is a Docker container the Supervisor manages. It cannot run `docker compose` for itself in the usual sense, but with `docker_api: true` the Supervisor mounts the host's Docker socket into it, and from there the controller does exactly what it does on a server:
+Every option is documented in the [add-on's DOCS.md](https://github.com/benkelly/ha-addons/blob/main/mercury-sandbox/DOCS.md). What follows is how it works underneath.
+
+## How the add-on works
+
+The [add-on](https://github.com/benkelly/ha-addons/tree/main/mercury-sandbox) is the controller image from this repository plus a `run.sh`. A Home Assistant add-on is a Docker container the Supervisor manages. It cannot run `docker compose` for itself in the usual sense, but with `docker_api: true` the Supervisor mounts the host's Docker socket into it, and from there the controller does exactly what it does on a server:
 
 1. `run.sh` turns the add-on options into `/data/mercury.env` (the `.env`).
 2. `mercury up` with `MERCURY_SERVICES=gateway` runs `docker compose up` on the host's Docker. The gateway becomes a sibling container of the add-on, on the `agentnet` network, exactly as on a laptop.
