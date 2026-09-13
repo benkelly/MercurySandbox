@@ -10,6 +10,10 @@ name: Release Please
 on:
   push:
     branches: [main]
+  # Re-run by hand, for example after enabling "Allow GitHub Actions to
+  # create and approve pull requests" in Settings -> Actions -> General,
+  # which release-please needs to open its release PR.
+  workflow_dispatch:
 
 permissions:
   contents: write
