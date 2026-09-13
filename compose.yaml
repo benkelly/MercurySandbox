@@ -1,0 +1,102 @@
+# MercurySandbox stack: one LLM gateway holding every provider key, one
+# controller that spawns throwaway sandboxes, and an optional Cloudflare
+# Tunnel. Drive it with bin/mercury (up / down / status / doctor), which loads
+# .env, enables the tunnel profile when a token is set and pulls or builds the
+# sandbox image. Plain `docker compose` works too once .env exists.
+#
+# Nothing here bind-mounts a host path except the Docker socket, so the same
+# file can be applied from a laptop, a server, or from inside the Home
+# Assistant add-on (which drives the host's Docker over that socket).
+name: mercury
+
+services:
+  # ---- LiteLLM gateway ----------------------------------------------------
+  # The only container that ever sees a provider key. Clients talk to it with
+  # LITELLM_MASTER_KEY and pick a model by the names in gateway/config.yaml.
+  gateway:
+    build:
+      context: ./gateway
+    image: mercury-gateway:local
+    container_name: mercury-gateway
+    restart: unless-stopped
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    # Loopback only by default. Remote access rides Tailscale, and the Home
+    # Assistant add-on flips GATEWAY_BIND deliberately when asked to.
+    ports:
+      - "${GATEWAY_BIND:-127.0.0.1}:${GATEWAY_PORT:-4000}:4000"
+    networks:
+      agentnet:
+        aliases:
+          - gateway
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  # ---- mercury controller -------------------------------------------------
+  # The same CLI you run on the host, packaged with the Docker CLI and a small
+  # HTTP API plus web page (mercuryd). It spawns sandboxes on the host's
+  # Docker through the socket, which makes it root-equivalent on that host:
+  # keep its port on loopback or behind Tailscale.
+  mercury:
+    build:
+      context: .
+    image: mercury:local
+    container_name: mercury
+    restart: unless-stopped
+    init: true
+    command: ["serve"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MERCURY_BIND: 0.0.0.0
+      MERCURY_GATEWAY_URL: http://gateway:4000/v1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "${MERCURY_BIND:-127.0.0.1}:${MERCURY_PORT:-5004}:5004"
+    networks:
+      - agentnet
+    depends_on:
+      gateway:
+        condition: service_started
+
+  # ---- Cloudflare Tunnel (optional, profile "tunnel") ---------------------
+  # Enabled by `mercury up` only when CLOUDFLARE_TUNNEL_TOKEN is set.
+  #
+  # SECURITY: cloudflared lives on its own "edge" network, deliberately NOT on
+  # agentnet, so no tunnel route can reach the gateway even by mistake. Route
+  # only host services you have put a Cloudflare Access policy in front of,
+  # via host.docker.internal. Never route to the gateway or to mercury.
+  cloudflared:
+    profiles:
+      - tunnel
+    image: cloudflare/cloudflared:2026.9.1
+    container_name: mercury-cloudflared
+    restart: unless-stopped
+    command: ["tunnel", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    networks:
+      - edge
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  # Sandboxes and the gateway live here. A sandbox reaches the gateway by the
+  # name "gateway" and nothing on your LAN by name.
+  agentnet:
+    name: agentnet
+  edge:
+    name: edge

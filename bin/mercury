@@ -3,7 +3,15 @@
 # A safe playground for autonomous coding agents.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MERCURY_ROOT="${MERCURY_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+export MERCURY_ROOT
+
+# shellcheck source=lib/common.sh
+source "$MERCURY_ROOT/lib/common.sh"
+# shellcheck source=lib/stack.sh
+source "$MERCURY_ROOT/lib/stack.sh"
+# shellcheck source=lib/sandbox.sh
+source "$MERCURY_ROOT/lib/sandbox.sh"
 
 [ $# -gt 0 ] || set -- help
 
@@ -24,101 +32,70 @@ if [ -n "$HOST" ]; then
 fi
 
 usage() {
-  cat <<'EOF'
+  cat <<'USAGE'
 mercury — a safe playground for autonomous coding agents
 
-Usage:
-  mercury up                      terraform init + apply (gateway, network, sandbox image)
-  mercury plan                    terraform plan, see what up would do
-  mercury down [--force]          terraform destroy, tear the stack down
-                                  (refuses while sandboxes are running)
-  mercury sandbox <git-url> [task] [model]
-                                  spawn a throwaway opencode sandbox
-  mercury ps                      list running sandbox containers
-  mercury logs <container>        follow a sandbox's output
-  mercury exec <container> [cmd...]
-                                  shell into a running sandbox (default: bash)
-  mercury kill <container>        stop a sandbox (it self-deletes)
-  mercury models                  list models exposed by the LiteLLM gateway
-  mercury status                  show the gateway container status
+Stack (docker compose: gateway, controller, optional tunnel):
+  mercury up [--pull]             build/pull and start the stack + sandbox image
+  mercury down [--force]          stop and remove the stack (refuses while sandboxes run)
+  mercury stop                    stop the stack, keep it for the next up
+  mercury status                  stack containers and running sandboxes
   mercury doctor                  read-only health checks on the whole stack
+  mercury models                  list models the gateway exposes
+  mercury logs <gateway|mercury|cloudflared|sandbox-name>
+
+Sandboxes (throwaway opencode containers, one repo and one task each):
+  mercury sandbox <git-url> [task] [model]
+                                  spawn one; no task = interactive TUI
+  mercury sandbox -d ...          spawn in the background (see sandbox --help)
+  mercury ps                      list running sandboxes
+  mercury exec <name> [cmd...]    shell into a running sandbox (default: bash)
+  mercury kill <name>             stop a sandbox (it self-deletes)
+
+Other:
+  mercury serve                   run mercuryd, the HTTP API and web page
   mercury install <hermes|webui|ocm>
-                                  run the matching install script
+                                  run the matching native install script
+  mercury version                 print the version
   mercury help                    show this help
 
 Remote:
-  Every command also runs against a remote Docker host over SSH, so you can
-  drive it from a laptop on the tailnet:
-
+  Every command also runs against a remote Docker host over SSH:
     mercury -H you@host status
     MERCURY_HOST=you@host mercury ps
-
   Requires this repo checked out on the remote, path set by MERCURY_REMOTE_DIR
   (default: ~/MercurySandbox).
-EOF
-}
-
-tf() {
-  if [ -f "$ROOT/.env" ]; then
-    # shellcheck disable=SC1091
-    source "$ROOT/scripts/tf-env.sh"
-  fi
-  terraform -chdir="$ROOT/terraform" "$@"
-}
-
-load_env() {
-  if [ -f "$ROOT/.env" ]; then
-    set -a
-    # shellcheck disable=SC1091
-    source "$ROOT/.env"
-    set +a
-  fi
+USAGE
 }
 
 cmd="${1:-help}"
 shift || true
 
 case "$cmd" in
-  up)
-    tf init -input=false
-    tf apply "$@"
-    ;;
-  plan)
-    tf init -input=false
-    tf plan "$@"
-    ;;
-  down)
-    force=0
-    if [ "${1:-}" = "--force" ] || [ "${1:-}" = "-f" ]; then
-      force=1
-      shift
-    fi
-    running="$(docker ps --filter label=mercury.sandbox --format '{{.Names}}' 2>/dev/null || true)"
-    if [ -n "$running" ] && [ "$force" -eq 0 ]; then
-      {
-        echo "mercury: sandboxes are still running:"
-        echo "$running" | sed 's/^/  /'
-        echo "Destroying now would cut them off, and removing the agentnet network"
-        echo "will fail while containers are attached, leaving a partial destroy."
-        echo "Stop them first (mercury kill <name>) or rerun with: mercury down --force"
-      } >&2
-      exit 1
-    fi
-    echo "Heads-up: this destroys the LiteLLM gateway too, anything mid-task" >&2
-    echo "(Hermes, opencode-manager) loses its model endpoint." >&2
-    tf destroy "$@"
-    ;;
-  sandbox)
-    "$ROOT/sandbox/run-sandbox.sh" "$@"
-    ;;
-  ps)
-    docker ps --filter label=mercury.sandbox --format 'table {{.Names}}\t{{.Status}}\t{{.RunningFor}}'
-    ;;
+  up) stack_up "$@" ;;
+  down) stack_down "$@" ;;
+  stop) stack_stop "$@" ;;
+  status) stack_status ;;
+  doctor) stack_doctor ;;
+  models) stack_models ;;
   logs)
-    docker logs -f "${1:?usage: mercury logs <container>}"
+    target="${1:?usage: mercury logs <gateway|mercury|cloudflared|sandbox-name>}"
+    shift
+    case "$target" in
+      gateway | mercury | cloudflared)
+        load_env
+        compose logs -f "$@" "$target"
+        ;;
+      *) docker logs -f "$@" "$target" ;;
+    esac
+    ;;
+  sandbox) sandbox_run "$@" ;;
+  ps)
+    docker ps --filter label=mercury.sandbox \
+      --format 'table {{.Names}}\t{{.Status}}\t{{.Label "mercury.branch"}}\t{{.Label "mercury.repo"}}'
     ;;
   exec)
-    name="${1:?usage: mercury exec <container> [cmd...]}"
+    name="${1:?usage: mercury exec <name> [cmd...]}"
     shift
     if [ $# -eq 0 ]; then
       docker exec -it "$name" bash
@@ -126,125 +103,25 @@ case "$cmd" in
       docker exec -it "$name" "$@"
     fi
     ;;
-  kill)
-    docker stop "${1:?usage: mercury kill <container>}"
-    ;;
-  models)
+  kill) docker stop -t 10 "${1:?usage: mercury kill <name>}" ;;
+  serve)
     load_env
-    resp="$(curl -fsS http://localhost:4000/v1/models \
-      -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}")"
-    if command -v jq >/dev/null 2>&1; then
-      jq -r '.data[].id' <<<"$resp"
-    else
-      printf '%s\n' "$resp"
-    fi
-    ;;
-  status)
-    docker ps --filter name=gateway --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
-    ;;
-  doctor)
-    fails=0
-    report() { printf '%-5s %s\n' "$1" "$2"; }
-
-    # 1. docker daemon
-    docker_up=0
-    if docker info >/dev/null 2>&1; then
-      report ok "docker daemon reachable"
-      docker_up=1
-    else
-      report FAIL "docker daemon not reachable"
-      fails=$((fails + 1))
-    fi
-
-    # 2-5. .env and its contents
-    if [ -f "$ROOT/.env" ]; then
-      report ok ".env present"
-      load_env
-      if [ -n "${LITELLM_MASTER_KEY:-}" ] && [ "${LITELLM_MASTER_KEY:-}" != "sk-local-change-me" ]; then
-        report ok "LITELLM_MASTER_KEY set"
-      else
-        report FAIL "LITELLM_MASTER_KEY missing or still the placeholder"
-        fails=$((fails + 1))
-      fi
-      if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${OPENROUTER_API_KEY:-}" ]; then
-        report ok "at least one provider key set"
-      else
-        report FAIL "no provider key set (ANTHROPIC_API_KEY / OPENROUTER_API_KEY)"
-        fails=$((fails + 1))
-      fi
-      if [ -n "${SANDBOX_GIT_TOKEN:-}" ]; then
-        report ok "SANDBOX_GIT_TOKEN set"
-      else
-        report warn "SANDBOX_GIT_TOKEN empty, non-interactive sandboxes can't push"
-      fi
-    else
-      report FAIL ".env missing at repo root (cp .env.example .env)"
-      fails=$((fails + 1))
-      report skip "LITELLM_MASTER_KEY (no .env)"
-      report skip "provider keys (no .env)"
-      report skip "SANDBOX_GIT_TOKEN (no .env)"
-    fi
-
-    # 6. terraform
-    if command -v terraform >/dev/null 2>&1; then
-      report ok "terraform on PATH"
-    else
-      report warn "terraform not on PATH"
-    fi
-
-    # 7-10. the running stack, skipped rather than failed when not up
-    if [ "$docker_up" -eq 1 ]; then
-      if [ -n "$(docker ps --filter name=gateway --filter status=running -q)" ]; then
-        report ok "gateway container running"
-        if curl -fsS -m 5 http://localhost:4000/v1/models \
-          -H "Authorization: Bearer ${LITELLM_MASTER_KEY:-}" >/dev/null 2>&1; then
-          report ok "gateway answers /v1/models"
-        else
-          report FAIL "gateway running but /v1/models not answering"
-          fails=$((fails + 1))
-        fi
-      else
-        report skip "gateway container not running (stack not up?)"
-        report skip "gateway endpoint (gateway not running)"
-      fi
-      img="${SANDBOX_IMAGE:-agent-sandbox:latest}"
-      if docker image inspect "$img" >/dev/null 2>&1; then
-        report ok "sandbox image present ($img)"
-      else
-        report skip "sandbox image $img not built (stack not up? mercury up builds it)"
-      fi
-      # RunningFor is humanized, so match >=24 hours or any day/week/month unit
-      orphans="$(docker ps --filter label=mercury.sandbox --format '{{.Names}} (up {{.RunningFor}})' |
-        grep -E '\((up )?((2[4-9]|[3-9][0-9]|[0-9]{3,}) hours|.*(day|week|month|year))' || true)"
-      if [ -n "$orphans" ]; then
-        report warn "sandboxes running for over 24h: $(echo "$orphans" | tr '\n' ' ')"
-      else
-        report ok "no sandboxes older than 24h"
-      fi
-    else
-      report skip "gateway container (docker not reachable)"
-      report skip "gateway endpoint (docker not reachable)"
-      report skip "sandbox image (docker not reachable)"
-      report skip "orphaned sandboxes (docker not reachable)"
-    fi
-
-    [ "$fails" -eq 0 ] || exit 1
+    exec python3 "$MERCURY_ROOT/mercuryd/server.py" "$@"
     ;;
   install)
     target="${1:-}"
     case "$target" in
-      hermes) "$ROOT/scripts/install-hermes.sh" ;;
-      webui) "$ROOT/scripts/install-webui.sh" ;;
-      ocm) "$ROOT/scripts/install-ocm.sh" ;;
+      hermes) "$MERCURY_ROOT/scripts/install-hermes.sh" ;;
+      webui) "$MERCURY_ROOT/scripts/install-webui.sh" ;;
+      ocm) "$MERCURY_ROOT/scripts/install-ocm.sh" ;;
       *)
         echo "usage: mercury install <hermes|webui|ocm>" >&2
         exit 1
         ;;
     esac
     ;;
-  help | -h | --help)
-    usage
-    ;;
+  version | --version | -v) mercury_version; echo ;;
+  help | -h | --help) usage ;;
   *)
     echo "mercury: unknown command '$cmd'" >&2
     usage >&2

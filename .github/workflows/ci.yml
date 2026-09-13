@@ -17,36 +17,61 @@ jobs:
       - name: bash -n on every script
         run: |
           set -euo pipefail
-          while IFS= read -r -d '' f; do
-            bash -n "$f"
-            echo "OK: $f"
-          done < <(find . -name '*.sh' -not -path './.git/*' -print0)
-          bash -n bin/mercury && echo "OK: bin/mercury"
+          for f in bin/mercury lib/*.sh sandbox/entrypoint.sh scripts/*.sh; do
+            bash -n "$f" && echo "OK: $f"
+          done
       - name: shellcheck
-        # SC1091: .env is sourced at runtime and doesn't exist in CI
-        # SC2154: vars like SANDBOX_GIT_TOKEN come from that .env
-        run: shellcheck -S warning -e SC1091 -e SC2154 sandbox/run-sandbox.sh scripts/*.sh bin/mercury
+        # SC1091: .env is sourced at runtime and does not exist in CI
+        run: shellcheck -S warning -e SC1091 bin/mercury lib/*.sh sandbox/entrypoint.sh scripts/*.sh
 
-  terraform:
-    name: Terraform fmt and validate
+  python:
+    name: mercuryd tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-      - run: terraform -chdir=terraform fmt -check -diff
-      - run: terraform -chdir=terraform init -backend=false
-      - run: terraform -chdir=terraform validate
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m py_compile mercuryd/server.py
+      - run: python3 -m unittest discover -s mercuryd -v
+
+  compose:
+    name: Compose file validates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker compose config (default and tunnel profile)
+        run: |
+          docker compose -f compose.yaml --env-file .env.example config -q
+          COMPOSE_PROFILES=tunnel docker compose -f compose.yaml --env-file .env.example config --services | grep -qx cloudflared
 
   docker:
-    name: Dockerfile lint and smoke build
+    name: Dockerfile lint and smoke builds
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: hadolint
         uses: hadolint/hadolint-action@v3.1.0
         with:
+          dockerfile: Dockerfile
+      - name: hadolint (sandbox)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
           dockerfile: sandbox/Dockerfile
+      - name: hadolint (gateway)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: gateway/Dockerfile
       - uses: docker/setup-buildx-action@v3
+      - name: Smoke-build controller image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: mercury:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Smoke-build sandbox image (no push)
         uses: docker/build-push-action@v6
         with:
@@ -55,6 +80,19 @@ jobs:
           tags: mercury-sandbox:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Controller image answers help and health
+        run: |
+          set -euo pipefail
+          docker run --rm mercury:ci help | grep -q 'safe playground'
+          docker run --rm mercury:ci version | grep -qx "$(cat VERSION)"
+          cid="$(docker run -d -e LITELLM_MASTER_KEY=ci mercury:ci serve)"
+          for _ in $(seq 1 20); do
+            if docker exec "$cid" curl -fsS http://127.0.0.1:5004/api/health | grep -q '"ok": true'; then
+              echo "mercuryd healthy"; docker rm -f "$cid" >/dev/null; exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$cid"; docker rm -f "$cid" >/dev/null; exit 1
 
   cli:
     name: mercury CLI smoke test
@@ -62,9 +100,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ./bin/mercury help
+      - run: ./bin/mercury version
+      - run: ./bin/mercury sandbox --help
       - name: unknown command exits non-zero
         run: |
           if ./bin/mercury no-such-command 2>/dev/null; then
             echo "expected failure for unknown command" >&2
+            exit 1
+          fi
+      - name: up refuses without .env
+        run: |
+          if ./bin/mercury up 2>/dev/null; then
+            echo "expected failure without .env" >&2
             exit 1
           fi

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MercurySandbox</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1c1a; --muted: #6b6862; --line: #e3e0d9;
+    --accent: #c47a1c; --ok: #2f8f4e; --bad: #b8402f; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161513; --panel: #201f1c; --ink: #ebe8e1; --muted: #9c9891; --line: #35332e; --accent: #e0973a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, sans-serif; padding: 16px; }
+  main { max-width: 1100px; margin: 0 auto; display: grid; gap: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+  h1 { font-size: 20px; margin: 0; }
+  h1 small { color: var(--muted); font-weight: normal; font-size: 12px; margin-left: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px; background: var(--panel); }
+  .chip.ok { border-color: var(--ok); color: var(--ok); }
+  .chip.bad { border-color: var(--bad); color: var(--bad); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  form { display: grid; gap: 10px; grid-template-columns: 1fr; }
+  @media (min-width: 720px) { form { grid-template-columns: 2fr 1fr; } form textarea, form .row { grid-column: 1 / -1; } }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  input, select, textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; width: 100%; }
+  textarea { min-height: 96px; resize: vertical; font-family: var(--mono); font-size: 13px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+  button.quiet { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  .msg { font-size: 13px; color: var(--muted); min-height: 1.2em; }
+  .msg.bad { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: normal; font-size: 12px; }
+  td.name { font-family: var(--mono); white-space: nowrap; }
+  td.task { color: var(--muted); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td .actions { display: flex; gap: 6px; }
+  td button { padding: 3px 9px; font-size: 12px; }
+  .empty { color: var(--muted); font-style: italic; }
+  pre { margin: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 12px; font: 12px/1.45 var(--mono); max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  .tablewrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>MercurySandbox <small id="version"></small></h1>
+    <div class="chips">
+      <span class="chip" id="chip-docker">docker</span>
+      <span class="chip" id="chip-gateway">gateway</span>
+      <span class="chip" id="chip-sandboxes">sandboxes</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>New sandbox</h2>
+    <form id="spawn">
+      <label>Repository URL
+        <input name="repo" placeholder="https://github.com/you/some-repo.git" required autocomplete="off">
+      </label>
+      <label>Model
+        <select name="model" id="model"></select>
+      </label>
+      <textarea name="task" placeholder="What should opencode do? It will clone the repo, do this, commit and push a branch for you to review." required></textarea>
+      <div class="row">
+        <button type="submit" id="spawn-btn">Spawn</button>
+        <span class="msg" id="spawn-msg"></span>
+      </div>
+    </form>
+  </section>
+
+  <section>
+    <h2>Running sandboxes</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Name</th><th>Branch</th><th>Repository</th><th>Model</th><th>Task</th><th>Status</th><th></th></tr></thead>
+        <tbody id="rows"><tr><td colspan="7" class="empty">loading</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="logs-section" hidden>
+    <h2>Logs <span id="logs-name" style="text-transform:none;letter-spacing:0"></span></h2>
+    <div class="row" style="margin-bottom:10px">
+      <button class="quiet" id="logs-refresh">Refresh</button>
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="logs-follow" style="width:auto"> follow</label>
+      <button class="quiet" id="logs-close">Close</button>
+    </div>
+    <pre id="logs"></pre>
+  </section>
+</main>
+
+<script>
+// Every URL is relative so the page works unchanged behind Home Assistant
+// ingress, which serves it under a path prefix.
+const $ = (id) => document.getElementById(id);
+let logsFor = null, followTimer = null;
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const text = await r.text();
+  let data = text;
+  try { data = JSON.parse(text); } catch (e) { /* plain text, e.g. logs */ }
+  if (!r.ok) throw new Error((data && data.error) || `${r.status} ${r.statusText}`);
+  return data;
+}
+
+function chip(id, ok, label) {
+  const el = $(id);
+  el.className = 'chip ' + (ok ? 'ok' : 'bad');
+  el.textContent = label;
+}
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function render(status) {
+  $('version').textContent = status.version ? 'v' + status.version : '';
+  chip('chip-docker', status.docker, status.docker ? 'docker ok' : 'docker unreachable');
+  chip('chip-gateway', status.gateway.ok, status.gateway.ok ? 'gateway ok' : status.gateway.detail);
+  chip('chip-sandboxes', true, `${status.sandboxes.length} running`);
+
+  const sel = $('model'), current = sel.value;
+  sel.innerHTML = '';
+  const models = status.models.length ? status.models : [status.default_model];
+  for (const m of models) {
+    const o = document.createElement('option');
+    o.value = o.textContent = m;
+    if (m === (current || status.default_model)) o.selected = true;
+    sel.appendChild(o);
+  }
+
+  const rows = $('rows');
+  if (!status.sandboxes.length) {
+    rows.innerHTML = '<tr><td colspan="7" class="empty">none running. Spawn one above, or from a terminal: mercury sandbox &lt;url&gt; "task"</td></tr>';
+    return;
+  }
+  rows.innerHTML = status.sandboxes.map(s => `
+    <tr>
+      <td class="name">${esc(s.name)}</td>
+      <td class="name">${esc(s.branch)}</td>
+      <td>${esc(s.repo)}</td>
+      <td>${esc(s.model)}</td>
+      <td class="task" title="${esc(s.task)}">${esc(s.task)}</td>
+      <td>${esc(s.status)}</td>
+      <td><div class="actions">
+        <button class="quiet" data-logs="${esc(s.name)}">logs</button>
+        <button class="quiet" data-kill="${esc(s.name)}">stop</button>
+      </div></td>
+    </tr>`).join('');
+}
+
+async function refresh() {
+  try {
+    render(await api('api/status'));
+  } catch (e) {
+    chip('chip-docker', false, 'mercuryd: ' + e.message);
+  }
+}
+
+async function showLogs(name) {
+  logsFor = name;
+  $('logs-section').hidden = false;
+  $('logs-name').textContent = name;
+  try {
+    const text = await api(`api/sandboxes/${encodeURIComponent(name)}/logs?tail=400`);
+    $('logs').textContent = text || '(no output yet)';
+    $('logs').scrollTop = $('logs').scrollHeight;
+  } catch (e) {
+    $('logs').textContent = 'error: ' + e.message;
+  }
+}
+
+$('spawn').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const msg = $('spawn-msg');
+  $('spawn-btn').disabled = true;
+  msg.className = 'msg';
+  msg.textContent = 'starting…';
+  try {
+    const r = await api('api/sandboxes', { method: 'POST', body: JSON.stringify({
+      repo: f.get('repo'), task: f.get('task'), model: f.get('model') }) });
+    msg.textContent = `started ${r.name}`;
+    ev.target.task.value = '';
+    await refresh();
+    showLogs(r.name);
+  } catch (e) {
+    msg.className = 'msg bad';
+    msg.textContent = e.message;
+  } finally {
+    $('spawn-btn').disabled = false;
+  }
+});
+
+$('rows').addEventListener('click', async (ev) => {
+  const b = ev.target.closest('button');
+  if (!b) return;
+  if (b.dataset.logs) return showLogs(b.dataset.logs);
+  if (b.dataset.kill && confirm(`Stop ${b.dataset.kill}? Uncommitted work in it is lost.`)) {
+    b.disabled = true;
+    try { await api(`api/sandboxes/${encodeURIComponent(b.dataset.kill)}`, { method: 'DELETE' }); }
+    catch (e) { alert(e.message); }
+    refresh();
+  }
+});
+
+$('logs-refresh').addEventListener('click', () => logsFor && showLogs(logsFor));
+$('logs-close').addEventListener('click', () => { $('logs-section').hidden = true; logsFor = null; $('logs-follow').checked = false; });
+$('logs-follow').addEventListener('change', (ev) => {
+  clearInterval(followTimer);
+  if (ev.target.checked) followTimer = setInterval(() => logsFor && showLogs(logsFor), 3000);
+});
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+docs
+*.md
+LICENSE
+mercuryd/__pycache__
+mercuryd/test_*.py
