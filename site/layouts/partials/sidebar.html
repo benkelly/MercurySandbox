@@ -1,0 +1,13 @@
+{{ $current := . }}
+{{ $docs := .Site.GetPage "/docs" }}
+<aside class="side">
+  <a class="{{ if eq $current $docs }}active{{ end }}" href="{{ $docs.RelPermalink }}">Overview</a>
+  {{ range $docs.Sections.ByWeight }}
+  <div class="group">
+    <a class="group-title {{ if eq $current . }}active{{ end }}" href="{{ .RelPermalink }}">{{ .Title }}</a>
+    {{ range .RegularPages.ByWeight }}
+    <a class="{{ if eq $current . }}active{{ end }}" href="{{ .RelPermalink }}">{{ .Title }}</a>
+    {{ end }}
+  </div>
+  {{ end }}
+</aside>

@@ -1,5 +1,8 @@
 .env
-terraform/.terraform/
-terraform/*.tfstate
-terraform/*.tfstate.*
-terraform/.terraform.lock.hcl
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+site/public/
+site/resources/
+site/.hugo_build.lock

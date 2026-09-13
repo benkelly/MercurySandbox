@@ -1,5 +1,7 @@
-# Deliberately unpinned: the sandbox image is throwaway and rebuilt often,
-# tracking latest tooling is the point.
+# Deliberately unpinned packages: the sandbox image is throwaway and rebuilt
+# often, tracking latest tooling is the point, and the controller image
+# follows Alpine's security updates on every release build.
 ignored:
-  - DL3008 # pin apt package versions
-  - DL3016 # pin npm package versions
+  - DL3008  # pin apt package versions
+  - DL3016  # pin npm package versions
+  - DL3018  # pin apk package versions

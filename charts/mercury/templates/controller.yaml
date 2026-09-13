@@ -1,0 +1,167 @@
+{{- if .Values.sandbox.rules }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mercury.fullname" . }}-rules
+  labels:
+    {{- include "mercury.labels" . | nindent 4 }}
+data:
+  AGENTS.md: |
+    {{- .Values.sandbox.rules | nindent 4 }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mercury.fullname" . }}
+  labels:
+    {{- include "mercury.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.controller.service.port }}
+      targetPort: http
+  selector:
+    {{- include "mercury.selector" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mercury.fullname" . }}
+  labels:
+    {{- include "mercury.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  replicas: {{ .Values.controller.replicas }}
+  selector:
+    matchLabels:
+      {{- include "mercury.selector" . | nindent 6 }}
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      labels:
+        {{- include "mercury.selector" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "mercury.serviceAccountName" . }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          image: "{{ .Values.image.controller.repository }}:{{ include "mercury.controllerTag" . }}"
+          imagePullPolicy: {{ .Values.image.controller.pullPolicy }}
+          args: ["serve"]
+          ports:
+            - name: http
+              containerPort: 5004
+          env:
+            - name: SANDBOX_BACKEND
+              value: kubernetes
+            - name: KUBE_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: MERCURY_BIND
+              value: "0.0.0.0"
+            - name: MERCURY_GATEWAY_URL
+              value: "http://{{ include "mercury.gatewayName" . }}:{{ .Values.gateway.service.port }}/v1"
+            - name: SANDBOX_GATEWAY_URL
+              value: "http://{{ include "mercury.gatewayName" . }}:{{ .Values.gateway.service.port }}/v1"
+            - name: SANDBOX_IMAGE
+              value: {{ include "mercury.sandboxImage" . | quote }}
+            {{- if .Values.imagePullSecrets }}
+            - name: SANDBOX_IMAGE_PULL_SECRET
+              value: {{ (first .Values.imagePullSecrets).name | quote }}
+            {{- end }}
+            - name: SANDBOX_DEFAULT_MODEL
+              value: {{ .Values.sandbox.defaultModel | quote }}
+            - name: SANDBOX_MEMORY
+              value: {{ .Values.sandbox.memory | quote }}
+            - name: SANDBOX_CPUS
+              value: {{ .Values.sandbox.cpus | quote }}
+            - name: SANDBOX_MEMORY_REQUEST
+              value: {{ .Values.sandbox.memoryRequest | quote }}
+            - name: SANDBOX_CPUS_REQUEST
+              value: {{ .Values.sandbox.cpusRequest | quote }}
+            - name: SANDBOX_WORK_SIZE
+              value: {{ .Values.sandbox.workSize | quote }}
+            - name: SANDBOX_TIMEOUT
+              value: {{ .Values.sandbox.timeout | quote }}
+            - name: SANDBOX_JOB_TTL
+              value: {{ .Values.sandbox.jobTtl | quote }}
+            - name: SANDBOX_GIT_NAME
+              value: {{ .Values.sandbox.git.name | quote }}
+            - name: SANDBOX_GIT_EMAIL
+              value: {{ .Values.sandbox.git.email | quote }}
+            {{- if .Values.gateway.virtualKeys.enabled }}
+            - name: MERCURY_VIRTUAL_KEYS
+              value: "1"
+            - name: SANDBOX_BUDGET_USD
+              value: {{ .Values.sandbox.budgetUsd | quote }}
+            - name: SANDBOX_KEY_TTL
+              value: {{ .Values.sandbox.keyTtl | quote }}
+            {{- end }}
+            {{- if .Values.sandbox.githubApp.appId }}
+            - name: GITHUB_APP_ID
+              value: {{ .Values.sandbox.githubApp.appId | quote }}
+            - name: GITHUB_APP_INSTALLATION_ID
+              value: {{ .Values.sandbox.githubApp.installationId | quote }}
+            - name: GITHUB_APP_PRIVATE_KEY_FILE
+              value: /etc/mercury/github-app.pem
+            {{- end }}
+            {{- if .Values.sandbox.rules }}
+            - name: SANDBOX_RULES_FILE
+              value: /etc/mercury/AGENTS.md
+            {{- end }}
+            {{- $secret := include "mercury.secretName" . }}
+            {{- range $k := list "LITELLM_MASTER_KEY" "SANDBOX_GIT_TOKEN" "MERCURY_API_TOKEN" }}
+            {{- include "mercury.secretEnv" (dict "key" $k "secret" $secret) | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            {{- if .Values.sandbox.githubApp.appId }}
+            - name: github-app
+              mountPath: /etc/mercury/github-app.pem
+              subPath: GITHUB_APP_PRIVATE_KEY
+              readOnly: true
+            {{- end }}
+            {{- if .Values.sandbox.rules }}
+            - name: rules
+              mountPath: /etc/mercury/AGENTS.md
+              subPath: AGENTS.md
+              readOnly: true
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+      volumes:
+        {{- if .Values.sandbox.githubApp.appId }}
+        - name: github-app
+          secret:
+            secretName: {{ $secret }}
+            items:
+              - key: GITHUB_APP_PRIVATE_KEY
+                path: GITHUB_APP_PRIVATE_KEY
+        {{- end }}
+        {{- if .Values.sandbox.rules }}
+        - name: rules
+          configMap:
+            name: {{ include "mercury.fullname" . }}-rules
+        {{- end }}

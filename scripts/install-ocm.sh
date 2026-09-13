@@ -10,4 +10,4 @@ if [ ! -f .env ]; then
 fi
 docker compose up -d
 echo "opencode-manager: http://localhost:5003 (create the admin account on first visit)"
-echo "Point its AI config at http://host.docker.internal:4000/v1 with your LiteLLM master key."
+echo "Point its AI config at http://host.docker.internal:4000/v1 with your LITELLM_MASTER_KEY."

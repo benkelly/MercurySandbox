@@ -1,0 +1,34 @@
+baseURL = "https://benkelly.github.io/MercurySandbox/"
+languageCode = "en-gb"
+title = "MercurySandbox"
+enableRobotsTXT = true
+disableKinds = ["taxonomy", "term", "rss"]
+
+[params]
+  description = "A safe playground for autonomous coding agents. One always-on brain, disposable hands."
+  github = "https://github.com/benkelly/MercurySandbox"
+  addon = "https://github.com/benkelly/ha-addons/tree/main/mercury-sandbox"
+
+[markup]
+  [markup.goldmark.renderer]
+    unsafe = true
+  [markup.highlight]
+    noClasses = false
+    lineNos = false
+  [markup.tableOfContents]
+    startLevel = 2
+    endLevel = 3
+
+[menu]
+  [[menu.main]]
+    name = "Docs"
+    url = "/docs/"
+    weight = 1
+  [[menu.main]]
+    name = "Getting started"
+    url = "/docs/getting-started/"
+    weight = 2
+  [[menu.main]]
+    name = "GitHub"
+    url = "https://github.com/benkelly/MercurySandbox"
+    weight = 3

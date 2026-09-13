@@ -1,0 +1,40 @@
+# Optional override, layered on by `mercury up` when MERCURY_VIRTUAL_KEYS=1:
+# gives the gateway a database so it can mint per-sandbox virtual keys (one
+# model, a dollar budget, an expiry) instead of handing every sandbox the
+# master key. The database sits on its own internal network with the gateway
+# as its only neighbour.
+services:
+  gateway:
+    environment:
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?set LITELLM_DB_PASSWORD in .env for virtual keys}@gateway-db:5432/litellm
+    networks:
+      - gwdb
+    depends_on:
+      gateway-db:
+        condition: service_healthy
+
+  gateway-db:
+    image: postgres:17-alpine
+    container_name: mercury-gateway-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:?}
+      POSTGRES_DB: litellm
+    volumes:
+      - gateway-db:/var/lib/postgresql/data
+    networks:
+      - gwdb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  gateway-db:
+
+networks:
+  gwdb:
+    name: mercury-gwdb
+    internal: true

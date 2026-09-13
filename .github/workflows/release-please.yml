@@ -1,0 +1,43 @@
+name: Release Please
+
+# Turns Conventional Commits on main into a release PR that bumps VERSION,
+# the chart's version and appVersion, and CHANGELOG.md. Merging that PR
+# creates the vX.Y.Z tag and a GitHub release, and this workflow then
+# publishes the images for it. (The tag is created with GITHUB_TOKEN, which
+# never triggers other workflows, so the publish is called from here rather
+# than relying on the tag push event.)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Release PR or tag
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+      version: ${{ steps.rp.outputs.version }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    name: Publish images for the release
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/release-image.yml
+    with:
+      ref: ${{ needs.release-please.outputs.tag_name }}
+      version: ${{ needs.release-please.outputs.version }}
+    permissions:
+      contents: read
+      packages: write

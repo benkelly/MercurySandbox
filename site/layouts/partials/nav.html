@@ -1,0 +1,9 @@
+<header class="top">
+  <a class="brand" href="{{ site.Home.RelPermalink }}"><img src="{{ "icon.png" | relURL }}" alt="" width="28" height="28"> MercurySandbox</a>
+  <nav>
+    {{ range .Site.Menus.main }}
+    {{- /* Hugo already prefixes menu URLs with the site's base path */ -}}
+    <a href="{{ .URL }}"{{ if hasPrefix .URL "http" }} rel="noopener"{{ end }}>{{ .Name }}</a>
+    {{ end }}
+  </nav>
+</header>
