@@ -1,12 +1,12 @@
 apiVersion: v2
 name: mercury
 description: >-
-  MercurySandbox on Kubernetes: a LiteLLM gateway that holds the model API
-  keys, and a controller that runs throwaway opencode sandboxes as hardened
-  Jobs, each pushing a branch for review.
+  MercurySandbox on Kubernetes: a LiteLLM gateway that holds the model API keys,
+  and a controller that runs throwaway opencode sandboxes as hardened Jobs, each
+  pushing a branch for review.
 type: application
 version: 0.1.0
-appVersion: "0.1.0"
+appVersion: 0.1.0
 home: https://github.com/benkelly/MercurySandbox
 sources:
   - https://github.com/benkelly/MercurySandbox
