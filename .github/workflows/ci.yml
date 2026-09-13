@@ -88,8 +88,9 @@ jobs:
         run: |
           set -euo pipefail
           v="$(cat VERSION)"
-          grep -qx "version: $v" charts/mercury/Chart.yaml
-          grep -qx "appVersion: \"$v\"" charts/mercury/Chart.yaml
+          # release-please rewrites these lines and may drop the quotes
+          grep -qE "^version: \"?$v\"?$" charts/mercury/Chart.yaml
+          grep -qE "^appVersion: \"?$v\"?$" charts/mercury/Chart.yaml
 
   docker:
     name: Dockerfile lint and smoke builds

@@ -18,18 +18,52 @@
           "path": "charts/mercury/Chart.yaml",
           "jsonpath": "$.appVersion"
         }
-      ]
+      ],
+      "initial-version": "0.1.0",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true
     }
   },
   "changelog-sections": [
-    { "type": "feat", "section": "Features" },
-    { "type": "fix", "section": "Bug fixes" },
-    { "type": "perf", "section": "Performance" },
-    { "type": "deps", "section": "Dependencies" },
-    { "type": "docs", "section": "Documentation" },
-    { "type": "refactor", "section": "Refactoring", "hidden": true },
-    { "type": "chore", "section": "Chores", "hidden": true },
-    { "type": "ci", "section": "CI", "hidden": true },
-    { "type": "test", "section": "Tests", "hidden": true }
+    {
+      "type": "feat",
+      "section": "Features"
+    },
+    {
+      "type": "fix",
+      "section": "Bug fixes"
+    },
+    {
+      "type": "perf",
+      "section": "Performance"
+    },
+    {
+      "type": "deps",
+      "section": "Dependencies"
+    },
+    {
+      "type": "docs",
+      "section": "Documentation"
+    },
+    {
+      "type": "refactor",
+      "section": "Refactoring",
+      "hidden": true
+    },
+    {
+      "type": "chore",
+      "section": "Chores",
+      "hidden": true
+    },
+    {
+      "type": "ci",
+      "section": "CI",
+      "hidden": true
+    },
+    {
+      "type": "test",
+      "section": "Tests",
+      "hidden": true
+    }
   ]
 }
