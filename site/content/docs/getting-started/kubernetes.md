@@ -21,13 +21,18 @@ flowchart LR
 
 ## Install
 
+The chart is published to GHCR as an OCI artifact with every release, at the same version as the images it pulls:
+
 ```bash
-helm install mercury charts/mercury --namespace agents --create-namespace \
+helm install mercury oci://ghcr.io/benkelly/charts/mercury --version 0.1.0 \
+  --namespace agents --create-namespace \
   --set secrets.litellmMasterKey="$(openssl rand -hex 24)" \
   --set secrets.anthropicApiKey=sk-ant-... \
   --set secrets.sandboxGitToken=github_pat_...
 kubectl -n agents port-forward svc/mercury 5004:5004
 ```
+
+`helm show values oci://ghcr.io/benkelly/charts/mercury --version 0.1.0` prints every setting. To install from a checkout instead, replace the OCI reference with `charts/mercury`.
 
 Or keep secrets out of values entirely: create a Secret with the keys listed
 in `values.yaml` under `secrets.existingSecret` and point the chart at it.
@@ -71,6 +76,6 @@ Interactive sandboxes (the opencode TUI, `--shell`) are Docker-only; on
 Kubernetes give every sandbox a task and use `mercury exec` on a running one
 when you need to look inside.
 
-The chart's `version` and `appVersion` track `VERSION`; the release workflow
-does not publish the chart, install it from the checkout or your own chart
-repository.
+The chart's `version` and `appVersion` track `VERSION`, and every release
+pushes it to `oci://ghcr.io/benkelly/charts/mercury`. Upgrade with
+`helm upgrade mercury oci://ghcr.io/benkelly/charts/mercury --version X.Y.Z --reuse-values`.

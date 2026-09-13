@@ -10,10 +10,10 @@ Releases are driven by [release-please](https://github.com/googleapis/release-pl
 
 1. Commits on `main` follow [Conventional Commits](https://www.conventionalcommits.org/): `feat: …`, `fix: …`, `docs: …`, `feat!: …` for a breaking change. Squash-merge pull requests with a conventional title.
 2. release-please keeps a **release PR** open on `main`. It bumps `VERSION`, the chart's `version` and `appVersion`, and prepends to `CHANGELOG.md` from the commit messages. `feat` bumps the minor, `fix` the patch, `!` the major.
-3. Merging the release PR creates the tag `vX.Y.Z` and a GitHub release, then calls the publish workflow, which pushes `ghcr.io/benkelly/mercury:X.Y.Z` and `ghcr.io/benkelly/mercury-sandbox:X.Y.Z` (multi-arch) plus `latest`.
+3. Merging the release PR creates the tag `vX.Y.Z` and a GitHub release, then calls the publish workflow, which pushes `ghcr.io/benkelly/mercury:X.Y.Z` and `ghcr.io/benkelly/mercury-sandbox:X.Y.Z` (multi-arch) plus `latest`, and the Helm chart to `oci://ghcr.io/benkelly/charts/mercury:X.Y.Z`.
 4. In the [ha-addons](https://github.com/benkelly/ha-addons) repository, a daily workflow notices the new release and opens a PR bumping the add-on's pinned image tag, version and changelog. Merge it and the add-on updates.
 
-Pushes to `main` that are not releases publish `edge` and `sha-<commit>` tags for people tracking the tip.
+Pushes to `main` that are not releases publish `edge` and `sha-<commit>` image tags for people tracking the tip; the chart is published for releases only.
 
 The first release is no different: the manifest starts at `0.0.0`, so the first `feat:` on `main` produces a release PR for `0.1.0`.
 
