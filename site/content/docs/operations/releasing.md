@@ -15,9 +15,11 @@ Releases are driven by [release-please](https://github.com/googleapis/release-pl
 
 Pushes to `main` that are not releases publish `edge` and `sha-<commit>` tags for people tracking the tip.
 
+The first release is no different: the manifest starts at `0.0.0`, so the first `feat:` on `main` produces a release PR for `0.1.0`.
+
 ## By hand
 
-Tagging manually still works and is what bootstraps the first release: `git tag -a v0.1.0 -m "…" && git push origin v0.1.0` runs the same publish workflow. The workflow refuses a tag that does not match `VERSION`.
+Tagging manually still works: `git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z` runs the same publish workflow. The workflow refuses a tag that does not match `VERSION`.
 
 ## What is pinned where
 

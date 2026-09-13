@@ -173,7 +173,7 @@ A Cloudflare Tunnel is optionally supported (`CLOUDFLARE_TUNNEL_TOKEN` in `.env`
 | `mercury-gateway:local` | `gateway/Dockerfile` (pinned LiteLLM + your config) | built locally by `mercury up`, never published |
 | `charts/mercury` | Helm chart, version follows `VERSION` | install from the checkout |
 
-Releases are cut by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`: merge its release PR and the tag, the GitHub release and the images follow. A hand-pushed `vX.Y.Z` tag works too and bootstraps the first release. See [Releasing](https://benkelly.github.io/MercurySandbox/docs/operations/releasing/).
+Releases are cut by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`: merge its release PR and the tag, the GitHub release and the images follow. A hand-pushed `vX.Y.Z` tag works too. See [Releasing](https://benkelly.github.io/MercurySandbox/docs/operations/releasing/).
 
 ## Repo layout
 
